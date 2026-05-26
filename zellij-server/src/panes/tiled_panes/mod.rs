@@ -751,6 +751,30 @@ impl TiledPanes {
             self.relayout(SplitDirection::Horizontal);
         }
     }
+    /// Compute the geometry of a split that inserts a new pane adjacent to `target_pane_id`.
+    ///
+    /// Returns `(grouped_panes, group_side_geom, new_pane_geom, split_direction)`:
+    /// - `grouped_panes` are the surviving panes that occupy the target's slot
+    ///   (they'll be resized to `group_side_geom`),
+    /// - `new_pane_geom` is where the freshly-inserted pane lands,
+    /// - `split_direction` is the axis that was bisected.
+    ///
+    /// Grouping rules differ by direction:
+    /// - **`Left`/`Right`** treat anything sharing the target's `x` *and* `cols`
+    ///   as one column-strip. The entire strip slides aside; the new pane spans
+    ///   the strip's combined height. This is what makes `--target-pane <name>
+    ///   --direction Right` land a sibling beside the whole column rather than
+    ///   nesting inside the target's vstack.
+    /// - **`Up`/`Down`** require the candidate's `x`, `cols`, `y`, and `rows`
+    ///   to all match the target's — i.e. only the target itself qualifies.
+    ///   The new pane lands inside the target's slot only, so adding a "drawer"
+    ///   under one pane doesn't disturb its siblings.
+    ///
+    /// Stacked targets are handled as a special case: every pane in the same
+    /// stack participates regardless of axis (the stack moves as a unit).
+    ///
+    /// Returns `None` when the bounding box of the group can't fit a split
+    /// (less than `2 * MIN_TERMINAL_*`) or when `target_pane_id` isn't present.
     fn pane_group_split_near_pane_id(
         &self,
         target_pane_id: PaneId,

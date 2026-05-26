@@ -1,4 +1,7 @@
-use super::Tab;
+use super::{
+    Tab, ERR_CANNOT_INSERT_NEAR_TARGET_PREFIX, ERR_CANNOT_MAKE_ROOM_WITHOUT_CLOSING_TARGET,
+    ERR_TARGET_PANE_AMBIGUOUS_PREFIX, ERR_TARGET_PANE_NOT_FOUND_PREFIX,
+};
 use crate::pane_groups::PaneGroups;
 use crate::panes::sixel::SixelImageStore;
 use crate::route::{wait_for_action_completion, ActionCompletionResult, NotificationEnd};
@@ -663,11 +666,10 @@ fn new_pane_with_missing_target_does_not_close_existing_panes_at_max_panes() {
     assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
     assert!(tab.has_pane_with_pid(&PaneId::Terminal(2)));
     assert!(!tab.has_pane_with_pid(&PaneId::Terminal(3)));
-    assert!(completion
-        .error_message
-        .as_deref()
-        .unwrap_or_default()
-        .contains("target pane"));
+    assert_eq!(
+        completion.error_message.as_deref(),
+        Some(format!("{ERR_TARGET_PANE_NOT_FOUND_PREFIX} missing").as_str())
+    );
 }
 
 #[test]
@@ -704,11 +706,15 @@ fn new_pane_with_too_small_target_does_not_close_existing_panes_at_max_panes() {
     assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 9));
     assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 9, 120, 9));
     assert!(!tab.has_pane_with_pid(&PaneId::Terminal(3)));
-    assert!(completion
-        .error_message
-        .as_deref()
-        .unwrap_or_default()
-        .contains("target pane"));
+    assert!(
+        completion
+            .error_message
+            .as_deref()
+            .map(|msg| msg.starts_with(ERR_CANNOT_INSERT_NEAR_TARGET_PREFIX))
+            .unwrap_or(false),
+        "expected error to start with {ERR_CANNOT_INSERT_NEAR_TARGET_PREFIX:?}, got {:?}",
+        completion.error_message
+    );
 }
 
 #[test]
@@ -775,11 +781,137 @@ fn new_pane_with_target_at_impossible_max_panes_reports_error() {
     let completion = wait_for_completion(rx);
     assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
     assert!(!tab.has_pane_with_pid(&PaneId::Terminal(2)));
-    assert!(completion
-        .error_message
-        .as_deref()
-        .unwrap_or_default()
-        .contains("without closing target pane"));
+    assert_eq!(
+        completion.error_message.as_deref(),
+        Some(ERR_CANNOT_MAKE_ROOM_WITHOUT_CLOSING_TARGET)
+    );
+}
+
+#[test]
+fn new_pane_errors_when_target_name_matches_multiple_panes() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab.rename_pane_by_pane_id(PaneId::Terminal(1), b"shared".to_vec())
+        .unwrap();
+    tab.rename_pane_by_pane_id(PaneId::Terminal(2), b"shared".to_vec())
+        .unwrap();
+
+    let (completion, rx) = completion();
+    let result = tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "shared".to_string(),
+            direction: Direction::Right,
+            borderless: None,
+        },
+        Some(1),
+        Some(completion),
+    );
+    assert!(result.is_err());
+
+    let completion = wait_for_completion(rx);
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(2)));
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(3)));
+    assert!(
+        completion
+            .error_message
+            .as_deref()
+            .map(|msg| msg.starts_with(ERR_TARGET_PANE_AMBIGUOUS_PREFIX))
+            .unwrap_or(false),
+        "expected ambiguity error, got {:?}",
+        completion.error_message
+    );
+}
+
+#[test]
+fn new_pane_disambiguates_duplicate_names_via_pane_id_string() {
+    // Even when two panes share a name, callers can disambiguate by passing
+    // the literal pane-id form (`terminal_<n>`) which short-circuits the name
+    // search.
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab.rename_pane_by_pane_id(PaneId::Terminal(1), b"shared".to_vec())
+        .unwrap();
+    tab.rename_pane_by_pane_id(PaneId::Terminal(2), b"shared".to_vec())
+        .unwrap();
+
+    tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_2".to_string(),
+            direction: Direction::Right,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(3)));
+    // Targeting terminal_2 with Right should bisect terminal_2's column only.
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 30, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (90, 0, 30, 20));
+}
+
+#[test]
+fn new_pane_errors_when_plugin_target_id_string_does_not_match_any_pane() {
+    // Exercises the `PaneId::from_str("plugin_<n>")` branch of the resolver:
+    // the parser accepts the form, but no matching pane exists, so resolution
+    // falls through to the name search and finally errors with the
+    // "not found" prefix. A positive test for live plugin-pane targeting
+    // needs PluginPane fixtures that the current test harness doesn't
+    // construct; this guards the parser path in the meantime.
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+    let (completion, rx) = completion();
+
+    let result = tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "plugin_5".to_string(),
+            direction: Direction::Right,
+            borderless: None,
+        },
+        Some(1),
+        Some(completion),
+    );
+    assert!(result.is_err());
+
+    let completion = wait_for_completion(rx);
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(2)));
+    assert_eq!(
+        completion.error_message.as_deref(),
+        Some(format!("{ERR_TARGET_PANE_NOT_FOUND_PREFIX} plugin_5").as_str())
+    );
 }
 
 #[test]

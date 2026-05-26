@@ -144,6 +144,16 @@ pub const MIN_TERMINAL_WIDTH: usize = 5;
 
 const MAX_PENDING_VTE_EVENTS: usize = 7000;
 
+// Error messages surfaced by `--target-pane` placement. Hoisted as consts so
+// callers (and tests) can match them by equality instead of substring.
+pub const ERR_TARGET_PANE_NOT_FOUND_PREFIX: &str = "Could not find tiled target pane:";
+pub const ERR_TARGET_PANE_AMBIGUOUS_PREFIX: &str =
+    "Multiple tiled panes match target pane name:";
+pub const ERR_CANNOT_INSERT_NEAR_TARGET_PREFIX: &str =
+    "Could not insert pane near target pane";
+pub const ERR_CANNOT_MAKE_ROOM_WITHOUT_CLOSING_TARGET: &str =
+    "Could not make room for targeted pane without closing target pane";
+
 type HoldForCommand = Option<RunCommand>;
 pub type SuppressedPanes = HashMap<PaneId, (bool, Box<dyn Pane>)>; // bool => is scrollback editor
 
@@ -1815,13 +1825,50 @@ impl Tab {
     ) -> Result<()> {
         let err_context =
             || format!("failed to create new pane with id {pid:?} near target {target_pane}");
-        let target_pane_id = if start_suppressed {
+        let target_pane_id_for_insertion = if start_suppressed {
+            // Suppressed panes never insert into the layout, so target
+            // resolution doesn't apply; just respect max_panes as the regular
+            // tiled path does.
+            self.close_down_to_max_terminals()
+                .with_context(err_context)?;
             None
         } else {
+            // First resolve: validate the target exists and is insertable in
+            // `direction`. The `protected_pane_ids` are the panes occupying
+            // the target's slot, which must survive any max-panes culling.
+            let (_, protected_pane_ids) =
+                match self.resolve_insertable_tiled_target_pane_id(&target_pane, direction) {
+                    Ok(resolved) => resolved,
+                    Err(error_message) => {
+                        self.close_new_pane_with_error(
+                            pid,
+                            blocking_notification,
+                            error_message.clone(),
+                        )
+                        .with_context(err_context)?;
+                        return Err(anyhow!(error_message)).with_context(err_context);
+                    },
+                };
+            if should_focus_pane {
+                self.hide_floating_panes();
+            }
+            if let Err(error_message) =
+                self.close_down_to_max_terminals_excluding(&protected_pane_ids)
+            {
+                self.close_new_pane_with_error(
+                    pid,
+                    blocking_notification,
+                    error_message.clone(),
+                )
+                .with_context(err_context)?;
+                return Err(anyhow!(error_message)).with_context(err_context);
+            }
+            // Re-resolve after the close. The protected set guarantees the
+            // target survives today, but an explicit re-bind catches any
+            // future regression of that invariant and yields the post-close
+            // target id to insert against.
             match self.resolve_insertable_tiled_target_pane_id(&target_pane, direction) {
-                Ok((target_pane_id, protected_pane_ids)) => {
-                    Some((target_pane_id, protected_pane_ids))
-                },
+                Ok((post_close_target_id, _)) => Some(post_close_target_id),
                 Err(error_message) => {
                     self.close_new_pane_with_error(
                         pid,
@@ -1833,38 +1880,6 @@ impl Tab {
                 },
             }
         };
-        if should_focus_pane {
-            self.hide_floating_panes();
-        }
-        match &target_pane_id {
-            Some((_, protected_pane_ids)) => {
-                if let Err(error_message) =
-                    self.close_down_to_max_terminals_excluding(protected_pane_ids)
-                {
-                    self.close_new_pane_with_error(
-                        pid,
-                        blocking_notification,
-                        error_message.clone(),
-                    )
-                    .with_context(err_context)?;
-                    return Err(anyhow!(error_message)).with_context(err_context);
-                }
-                if let Err(error_message) =
-                    self.resolve_insertable_tiled_target_pane_id(&target_pane, direction)
-                {
-                    self.close_new_pane_with_error(
-                        pid,
-                        blocking_notification,
-                        error_message.clone(),
-                    )
-                    .with_context(err_context)?;
-                    return Err(anyhow!(error_message)).with_context(err_context);
-                }
-            },
-            None => self
-                .close_down_to_max_terminals()
-                .with_context(err_context)?,
-        }
         let mut new_pane = match pid {
             PaneId::Terminal(term_pid) => {
                 let next_terminal_position = self.get_next_terminal_position();
@@ -1940,7 +1955,23 @@ impl Tab {
             return Ok(());
         }
 
-        let (target_pane_id, _) = target_pane_id.expect("target pane id checked above");
+        // The start_suppressed branch returns early above, so by this point
+        // we must have a target id from the validation phase. Pattern-match
+        // (instead of expect) so a future early-return added above can't
+        // silently turn into a panic.
+        let Some(target_pane_id) = target_pane_id_for_insertion else {
+            log::error!(
+                "internal: target pane id missing after validation for pid {:?}",
+                pid
+            );
+            self.senders
+                .send_to_pty(PtyInstruction::ClosePane(pid, None))
+                .with_context(err_context)?;
+            return Err(anyhow!(
+                "internal: target pane id missing after validation"
+            ))
+            .with_context(err_context);
+        };
 
         if self.tiled_panes.fullscreen_is_active() {
             self.tiled_panes.unset_fullscreen();
@@ -2878,21 +2909,19 @@ impl Tab {
         target_pane: &str,
         direction: Direction,
     ) -> Result<(PaneId, HashSet<PaneId>), String> {
-        let Some(target_pane_id) = self.resolve_tiled_target_pane_id(target_pane) else {
-            return Err(format!("Could not find tiled target pane: {target_pane}"));
-        };
+        let target_pane_id = self.resolve_tiled_target_pane_id(target_pane)?;
         let Some(protected_pane_ids) = self
             .tiled_panes
             .pane_ids_in_insert_group_near_pane_id(target_pane_id, direction)
         else {
             return Err(format!(
-                "Could not insert pane near target pane {:?}",
+                "{ERR_CANNOT_INSERT_NEAR_TARGET_PREFIX} {:?}",
                 target_pane_id
             ));
         };
         if protected_pane_ids.is_empty() {
             return Err(format!(
-                "Could not insert pane near target pane {:?}",
+                "{ERR_CANNOT_INSERT_NEAR_TARGET_PREFIX} {:?}",
                 target_pane_id
             ));
         }
@@ -2911,24 +2940,37 @@ impl Tab {
         self.senders
             .send_to_pty(PtyInstruction::ClosePane(pid, completion))
     }
-    fn resolve_tiled_target_pane_id(&self, target_pane: &str) -> Option<PaneId> {
+    fn resolve_tiled_target_pane_id(&self, target_pane: &str) -> Result<PaneId, String> {
+        // A literal pane-id form (`terminal_3`, `plugin_7`, or bare `3` →
+        // Terminal(3)) wins outright, so callers can always disambiguate by ID
+        // even when multiple panes share a name.
         if let Ok(parsed_pane_id) = zellij_utils::data::PaneId::from_str(target_pane) {
             let pane_id: PaneId = parsed_pane_id.into();
             if self.tiled_panes.panes_contain(&pane_id) {
-                return Some(pane_id);
+                return Ok(pane_id);
             }
         }
-        self.tiled_panes.panes.iter().find_map(|(pane_id, pane)| {
-            let matches_custom_title = pane
-                .custom_title()
-                .map(|custom_title| custom_title == target_pane)
-                .unwrap_or(false);
-            if matches_custom_title || pane.current_title() == target_pane {
-                Some(*pane_id)
-            } else {
-                None
-            }
-        })
+        let mut matches = self
+            .tiled_panes
+            .panes
+            .iter()
+            .filter(|(_, pane)| {
+                let matches_custom_title = pane
+                    .custom_title()
+                    .map(|custom_title| custom_title == target_pane)
+                    .unwrap_or(false);
+                matches_custom_title || pane.current_title() == target_pane
+            })
+            .map(|(pane_id, _)| *pane_id);
+        match (matches.next(), matches.next()) {
+            (None, _) => Err(format!(
+                "{ERR_TARGET_PANE_NOT_FOUND_PREFIX} {target_pane}"
+            )),
+            (Some(first), None) => Ok(first),
+            (Some(_), Some(_)) => Err(format!(
+                "{ERR_TARGET_PANE_AMBIGUOUS_PREFIX} {target_pane} (disambiguate with terminal_<id> or plugin_<id>)"
+            )),
+        }
     }
     pub fn has_non_suppressed_pane_with_pid(&self, pid: &PaneId) -> bool {
         self.tiled_panes.panes_contain(pid) || self.floating_panes.panes_contain(pid)
@@ -4147,11 +4189,17 @@ impl Tab {
             return Ok(());
         };
         let terminals = self.get_tiled_pane_ids();
+        // Reserve one slot for the pane we're about to insert.
         let panes_to_keep = max_panes.saturating_sub(1);
         let panes_to_close = terminals.len().saturating_sub(panes_to_keep);
         if panes_to_close == 0 {
             return Ok(());
         }
+        // Close the "excess" panes (indices >= panes_to_keep) first, falling
+        // back to the early-index panes only if the excess is short by enough
+        // that we'd otherwise have to close a protected pane. `skip(k)` and
+        // `take(k)` over the same vector are disjoint, so no PaneId can be
+        // selected twice.
         let pane_ids_to_close: Vec<PaneId> = terminals
             .iter()
             .skip(panes_to_keep)
@@ -4161,7 +4209,7 @@ impl Tab {
             .copied()
             .collect();
         if pane_ids_to_close.len() < panes_to_close {
-            return Err("Could not make room for targeted pane without closing target pane".into());
+            return Err(ERR_CANNOT_MAKE_ROOM_WITHOUT_CLOSING_TARGET.to_string());
         }
         for pid in pane_ids_to_close {
             self.senders
