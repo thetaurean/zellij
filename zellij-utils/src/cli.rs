@@ -896,6 +896,18 @@ pub enum CliAction {
         #[clap(short, long, value_parser, conflicts_with("floating"))]
         direction: Option<Direction>,
 
+        /// Pane name or ID to split relative to (eg. editor, terminal_1, plugin_2, or 3)
+        #[clap(
+            long,
+            value_parser,
+            requires("direction"),
+            conflicts_with("floating"),
+            conflicts_with("in-place"),
+            conflicts_with("stacked"),
+            conflicts_with("near-current-pane")
+        )]
+        target_pane: Option<String>,
+
         #[clap(last(true))]
         command: Vec<String>,
 

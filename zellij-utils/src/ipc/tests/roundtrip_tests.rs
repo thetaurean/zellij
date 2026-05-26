@@ -23,6 +23,31 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 #[test]
+fn new_tiled_pane_rejects_non_tiled_placement() {
+    use crate::client_server_contract::client_server_contract as protobuf;
+
+    let protobuf_action = protobuf::Action {
+        action_type: Some(protobuf::action::ActionType::NewTiledPane(
+            protobuf::NewTiledPaneAction {
+                command: None,
+                direction: None,
+                pane_name: None,
+                near_current_pane: false,
+                borderless: None,
+                tab_id: None,
+                placement: Some(protobuf::NewPanePlacement {
+                    placement_type: Some(protobuf::new_pane_placement::PlacementType::Floating(
+                        protobuf::FloatingPaneCoordinates::default(),
+                    )),
+                }),
+            },
+        )),
+    };
+
+    assert!(Action::try_from(protobuf_action).is_err());
+}
+
+#[test]
 fn server_client_contract() {
     // here we test all possible values of each of the nested types in the server/client contract
     // in the context of its message.
@@ -1340,10 +1365,28 @@ fn test_client_messages() {
     test_client_roundtrip!(ClientToServerMsg::Action {
         action: Action::NewTiledPane {
             command: None,
-            direction: None,
+            placement: NewPanePlacement::Tiled {
+                direction: None,
+                borderless: None,
+            },
             pane_name: None,
             near_current_pane: false,
-            borderless: None,
+            tab_id: None,
+        },
+        terminal_id: Some(1),
+        client_id: Some(100),
+        is_cli_client: true,
+    });
+    test_client_roundtrip!(ClientToServerMsg::Action {
+        action: Action::NewTiledPane {
+            command: None,
+            placement: NewPanePlacement::TiledNearTarget {
+                target_pane: "editor-main".to_owned(),
+                direction: Direction::Down,
+                borderless: Some(true),
+            },
+            pane_name: None,
+            near_current_pane: false,
             tab_id: None,
         },
         terminal_id: Some(1),
@@ -1366,10 +1409,12 @@ fn test_client_messages() {
                 }),
                 use_terminal_title: false,
             }),
-            direction: Some(Direction::Right),
+            placement: NewPanePlacement::Tiled {
+                direction: Some(Direction::Right),
+                borderless: Some(true),
+            },
             pane_name: Some("my_pane_name".to_owned()),
             near_current_pane: false,
-            borderless: Some(true),
             tab_id: None,
         },
         terminal_id: Some(1),
@@ -2533,11 +2578,13 @@ fn test_client_messages() {
     // tab_id roundtrip tests - verify tab_id survives serialization
     test_client_roundtrip!(ClientToServerMsg::Action {
         action: Action::NewTiledPane {
-            direction: Some(Direction::Right),
+            placement: NewPanePlacement::Tiled {
+                direction: Some(Direction::Right),
+                borderless: None,
+            },
             command: None,
             pane_name: None,
             near_current_pane: false,
-            borderless: None,
             tab_id: Some(3),
         },
         terminal_id: Some(1),

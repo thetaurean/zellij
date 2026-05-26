@@ -259,11 +259,10 @@ pub enum Action {
     /// Open a new tiled (embedded, non-floating) pane
     /// Returns: Created pane ID (format: terminal_<id> or plugin_<id>)
     NewTiledPane {
-        direction: Option<Direction>,
+        placement: NewPanePlacement,
         command: Option<RunCommandAction>,
         pane_name: Option<String>,
         near_current_pane: bool,
-        borderless: Option<bool>,
         tab_id: Option<usize>,
     },
     /// Open a new pane in place of the focused one, suppressing it instead
@@ -1009,6 +1008,7 @@ impl Action {
             },
             CliAction::NewPane {
                 direction,
+                target_pane,
                 command,
                 plugin,
                 cwd,
@@ -1093,10 +1093,7 @@ impl Action {
                             borderless,
                         }
                     } else {
-                        NewPanePlacement::Tiled {
-                            direction,
-                            borderless,
-                        }
+                        tiled_placement_from_cli(target_pane, direction, borderless)?
                     };
 
                     Ok(vec![Action::NewBlockingPane {
@@ -1205,12 +1202,13 @@ impl Action {
                             tab_id,
                         }])
                     } else {
+                        let placement =
+                            tiled_placement_from_cli(target_pane, direction, borderless)?;
                         Ok(vec![Action::NewTiledPane {
-                            direction,
+                            placement,
                             command: Some(run_command_action),
                             pane_name: name,
                             near_current_pane,
-                            borderless,
                             tab_id,
                         }])
                     }
@@ -1242,12 +1240,13 @@ impl Action {
                             tab_id,
                         }])
                     } else {
+                        let placement =
+                            tiled_placement_from_cli(target_pane, direction, borderless)?;
                         Ok(vec![Action::NewTiledPane {
-                            direction,
+                            placement,
                             command: None,
                             pane_name: name,
                             near_current_pane,
-                            borderless,
                             tab_id,
                         }])
                     }
@@ -2257,6 +2256,28 @@ fn suggest_key_fix(key_str: &str) -> String {
     }
 
     "  Hint: Use format like \"Ctrl a\", \"Alt Shift F1\", or \"Enter\"".to_string()
+}
+
+fn tiled_placement_from_cli(
+    target_pane: Option<String>,
+    direction: Option<Direction>,
+    borderless: Option<bool>,
+) -> Result<NewPanePlacement, String> {
+    match target_pane {
+        Some(target_pane) => {
+            let direction =
+                direction.ok_or_else(|| "--target-pane requires --direction".to_string())?;
+            Ok(NewPanePlacement::TiledNearTarget {
+                target_pane,
+                direction,
+                borderless,
+            })
+        },
+        None => Ok(NewPanePlacement::Tiled {
+            direction,
+            borderless,
+        }),
+    }
 }
 
 impl From<OnForceClose> for Action {
@@ -3565,6 +3586,7 @@ mod tests {
     fn test_new_pane_tiled_with_tab_id() {
         let cli_action = CliAction::NewPane {
             direction: Some(Direction::Right),
+            target_pane: None,
             command: vec![],
             plugin: None,
             cwd: None,
@@ -3604,9 +3626,110 @@ mod tests {
     }
 
     #[test]
+    fn test_new_pane_tiled_with_target_pane_id() {
+        let cli_action = CliAction::NewPane {
+            direction: Some(Direction::Right),
+            target_pane: Some("terminal_9".to_string()),
+            command: vec![],
+            plugin: None,
+            cwd: None,
+            floating: false,
+            in_place: false,
+            close_replaced_pane: false,
+            name: None,
+            close_on_exit: false,
+            start_suspended: false,
+            configuration: None,
+            skip_plugin_cache: false,
+            x: None,
+            y: None,
+            width: None,
+            height: None,
+            pinned: None,
+            stacked: false,
+            blocking: false,
+            block_until_exit_success: false,
+            block_until_exit_failure: false,
+            block_until_exit: false,
+            unblock_condition: None,
+            near_current_pane: false,
+            borderless: Some(true),
+            tab_id: None,
+        };
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert!(result.is_ok());
+        let actions = result.unwrap();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            Action::NewTiledPane { placement, .. } => {
+                assert_eq!(
+                    placement,
+                    &NewPanePlacement::TiledNearTarget {
+                        target_pane: "terminal_9".to_string(),
+                        direction: Direction::Right,
+                        borderless: Some(true),
+                    }
+                );
+            },
+            _ => panic!("Expected NewTiledPane action"),
+        }
+    }
+
+    #[test]
+    fn test_new_pane_tiled_with_target_pane_name() {
+        let cli_action = CliAction::NewPane {
+            direction: Some(Direction::Down),
+            target_pane: Some("editor".to_string()),
+            command: vec![],
+            plugin: None,
+            cwd: None,
+            floating: false,
+            in_place: false,
+            close_replaced_pane: false,
+            name: None,
+            close_on_exit: false,
+            start_suspended: false,
+            configuration: None,
+            skip_plugin_cache: false,
+            x: None,
+            y: None,
+            width: None,
+            height: None,
+            pinned: None,
+            stacked: false,
+            blocking: false,
+            block_until_exit_success: false,
+            block_until_exit_failure: false,
+            block_until_exit: false,
+            unblock_condition: None,
+            near_current_pane: false,
+            borderless: None,
+            tab_id: None,
+        };
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert!(result.is_ok());
+        let actions = result.unwrap();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            Action::NewTiledPane { placement, .. } => {
+                assert_eq!(
+                    placement,
+                    &NewPanePlacement::TiledNearTarget {
+                        target_pane: "editor".to_string(),
+                        direction: Direction::Down,
+                        borderless: None,
+                    }
+                );
+            },
+            _ => panic!("Expected NewTiledPane action"),
+        }
+    }
+
+    #[test]
     fn test_new_pane_tiled_without_tab_id() {
         let cli_action = CliAction::NewPane {
             direction: None,
+            target_pane: None,
             command: vec![],
             plugin: None,
             cwd: None,
@@ -3649,6 +3772,7 @@ mod tests {
     fn test_new_pane_floating_with_tab_id() {
         let cli_action = CliAction::NewPane {
             direction: None,
+            target_pane: None,
             command: vec![],
             plugin: None,
             cwd: None,
@@ -3691,6 +3815,7 @@ mod tests {
     fn test_new_pane_stacked_with_tab_id() {
         let cli_action = CliAction::NewPane {
             direction: None,
+            target_pane: None,
             command: vec!["ls".into()],
             plugin: None,
             cwd: None,
@@ -3733,6 +3858,7 @@ mod tests {
     fn test_new_pane_blocking_with_tab_id() {
         let cli_action = CliAction::NewPane {
             direction: None,
+            target_pane: None,
             command: vec!["ls".into()],
             plugin: None,
             cwd: None,
@@ -3837,6 +3963,7 @@ mod tests {
     fn test_new_pane_plugin_tiled_with_tab_id() {
         let cli_action = CliAction::NewPane {
             direction: None,
+            target_pane: None,
             command: vec![],
             plugin: Some("zellij:strider".into()),
             cwd: None,
@@ -3879,6 +4006,7 @@ mod tests {
     fn test_new_pane_plugin_floating_with_tab_id() {
         let cli_action = CliAction::NewPane {
             direction: None,
+            target_pane: None,
             command: vec![],
             plugin: Some("zellij:strider".into()),
             cwd: None,

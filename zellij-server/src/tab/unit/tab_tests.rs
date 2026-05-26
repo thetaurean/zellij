@@ -1,10 +1,12 @@
 use super::Tab;
 use crate::pane_groups::PaneGroups;
 use crate::panes::sixel::SixelImageStore;
+use crate::route::{wait_for_action_completion, ActionCompletionResult, NotificationEnd};
 use crate::screen::CopyOptions;
 use crate::{os_input_output::ServerOsApi, panes::PaneId, thread_bus::ThreadSenders, ClientId};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
+use tokio::sync::oneshot;
 use zellij_utils::data::{Direction, NewPanePlacement, Resize, ResizeStrategy, WebSharing};
 use zellij_utils::errors::prelude::*;
 use zellij_utils::input::layout::{SplitDirection, SplitSize, TiledPaneLayout};
@@ -146,12 +148,19 @@ fn tab_resize_right(tab: &mut Tab, id: ClientId) {
 }
 
 fn create_new_tab(size: Size, stacked_resize: bool) -> Tab {
+    create_new_tab_with_max_panes(size, stacked_resize, None)
+}
+
+fn create_new_tab_with_max_panes(
+    size: Size,
+    stacked_resize: bool,
+    max_panes: Option<usize>,
+) -> Tab {
     let index = 0;
     let position = 0;
     let name = String::new();
     let os_api = Box::new(FakeInputOutput {});
     let senders = ThreadSenders::default().silently_fail_on_send();
-    let max_panes = None;
     let mode_info = ModeInfo::default();
     let style = Style::default();
     let draw_pane_frames = true;
@@ -407,6 +416,416 @@ fn create_new_tab_with_cell_size(
     )
     .unwrap();
     tab
+}
+
+fn completion() -> (NotificationEnd, oneshot::Receiver<ActionCompletionResult>) {
+    let (tx, rx) = oneshot::channel();
+    (NotificationEnd::new(tx), rx)
+}
+
+fn wait_for_completion(rx: oneshot::Receiver<ActionCompletionResult>) -> ActionCompletionResult {
+    wait_for_action_completion(rx, "new-pane", false)
+}
+
+fn pane_geom(tab: &Tab, pane_id: PaneId) -> (usize, usize, usize, usize) {
+    let geom = tab
+        .tiled_panes
+        .panes
+        .get(&pane_id)
+        .unwrap()
+        .position_and_size();
+    (geom.x, geom.y, geom.cols.as_usize(), geom.rows.as_usize())
+}
+
+#[test]
+fn new_pane_right_of_named_top_level_target_spans_target_slot() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.rename_pane_by_pane_id(PaneId::Terminal(1), b"A".to_vec())
+        .unwrap();
+    tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "A".to_string(),
+            direction: Direction::Right,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 20));
+}
+
+#[test]
+fn new_pane_right_of_target_inside_vertical_group_spans_whole_group() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.horizontal_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 10, 120, 10));
+
+    tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Right,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 10, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 0, 60, 20));
+}
+
+#[test]
+fn new_pane_down_of_leaf_target_creates_vertical_pair() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 10, 120, 10));
+}
+
+#[test]
+fn new_pane_down_of_leaf_target_beside_sibling_splits_only_target() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 20));
+
+    tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 10, 60, 10));
+}
+
+#[test]
+fn new_pane_down_of_leaf_target_above_sibling_splits_only_target() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.horizontal_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 10, 120, 10));
+
+    tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 5));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 10, 120, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 5, 120, 5));
+}
+
+#[test]
+fn new_pane_up_of_leaf_target_below_sibling_splits_only_target() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.horizontal_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 10, 120, 10));
+
+    tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_2".to_string(),
+            direction: Direction::Up,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 15, 120, 5));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 10, 120, 5));
+}
+
+#[test]
+fn new_pane_with_missing_target_does_not_close_existing_panes_at_max_panes() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab_with_max_panes(size, true, Some(2));
+
+    tab.horizontal_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    let (completion, rx) = completion();
+
+    let missing_target_result = tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "missing".to_string(),
+            direction: Direction::Right,
+            borderless: None,
+        },
+        Some(1),
+        Some(completion),
+    );
+    assert!(missing_target_result.is_err());
+
+    let completion = wait_for_completion(rx);
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(2)));
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(3)));
+    assert!(completion
+        .error_message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("target pane"));
+}
+
+#[test]
+fn new_pane_with_too_small_target_does_not_close_existing_panes_at_max_panes() {
+    let size = Size {
+        cols: 120,
+        rows: 18,
+    };
+    let mut tab = create_new_tab_with_max_panes(size, true, Some(2));
+
+    tab.horizontal_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 9));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 9, 120, 9));
+    let (completion, rx) = completion();
+
+    let result = tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+        },
+        Some(1),
+        Some(completion),
+    );
+    assert!(result.is_err());
+
+    let completion = wait_for_completion(rx);
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 9));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 9, 120, 9));
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(3)));
+    assert!(completion
+        .error_message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("target pane"));
+}
+
+#[test]
+fn new_pane_with_target_at_max_panes_keeps_target_and_closes_other_pane() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab_with_max_panes(size, true, Some(2));
+
+    tab.horizontal_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 10, 120, 10));
+
+    tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_2".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(2)));
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(3)));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 0, 120, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 10, 120, 10));
+}
+
+#[test]
+fn new_pane_with_target_at_impossible_max_panes_reports_error() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab_with_max_panes(size, true, Some(1));
+    let (completion, rx) = completion();
+
+    let result = tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Right,
+            borderless: None,
+        },
+        Some(1),
+        Some(completion),
+    );
+    assert!(result.is_err());
+
+    let completion = wait_for_completion(rx);
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(2)));
+    assert!(completion
+        .error_message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("without closing target pane"));
+}
+
+#[test]
+fn new_pane_down_of_stacked_target_splits_stack_as_unit() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::Stacked {
+            pane_id_to_stack_under: Some(zellij_utils::data::PaneId::Terminal(1)),
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 1));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 1, 120, 19));
+
+    tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 1));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 1, 120, 9));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 10, 120, 10));
 }
 
 #[test]

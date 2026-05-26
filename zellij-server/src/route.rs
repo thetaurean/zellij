@@ -856,11 +856,10 @@ pub(crate) fn route_action(
                 .with_context(err_context)?;
         },
         Action::NewTiledPane {
-            direction,
+            placement,
             command: run_command,
             pane_name: name,
             near_current_pane,
-            borderless,
             tab_id,
         } => {
             let run_cmd = run_command
@@ -877,10 +876,7 @@ pub(crate) fn route_action(
                 .send_to_pty(PtyInstruction::SpawnTerminal(
                     run_cmd,
                     name,
-                    NewPanePlacement::Tiled {
-                        direction,
-                        borderless,
-                    },
+                    placement,
                     false,
                     client_tab_index_or_paneid,
                     Some(NotificationEnd::new(completion_tx)),

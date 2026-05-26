@@ -1,9 +1,9 @@
 mod kdl_layout_parser;
 use crate::data::{
     BareKey, Direction, FloatingPaneCoordinates, InputMode, KeyWithModifier, LayoutInfo,
-    LayoutMetadata, MultiplayerColors, Palette, PaletteColor, PaneId, PaneInfo, PaneManifest,
-    PermissionType, Resize, SessionInfo, StyleDeclaration, Styling, TabInfo, WebSharing,
-    DEFAULT_STYLES,
+    LayoutMetadata, MultiplayerColors, NewPanePlacement, Palette, PaletteColor, PaneId, PaneInfo,
+    PaneManifest, PermissionType, Resize, SessionInfo, StyleDeclaration, Styling, TabInfo,
+    WebSharing, DEFAULT_STYLES,
 };
 use crate::envs::EnvironmentVariables;
 use crate::home::{find_default_config_dir, get_layout_dir};
@@ -839,11 +839,14 @@ impl Action {
                 Some(node)
             },
             Action::NewTiledPane {
-                direction,
+                placement:
+                    NewPanePlacement::Tiled {
+                        direction,
+                        borderless: _,
+                    },
                 command: run_command_action,
                 pane_name: name,
                 near_current_pane: false,
-                borderless: _,
                 ..
             } => {
                 let mut node = KdlNode::new("Run");
@@ -2023,11 +2026,13 @@ impl TryFrom<(&KdlNode, &Options)> for Action {
                     })
                 } else {
                     Ok(Action::NewTiledPane {
-                        direction,
+                        placement: NewPanePlacement::Tiled {
+                            direction,
+                            borderless: None,
+                        },
                         command: Some(run_command_action),
                         pane_name: name,
                         near_current_pane: false,
-                        borderless: None,
                         tab_id: None,
                     })
                 }

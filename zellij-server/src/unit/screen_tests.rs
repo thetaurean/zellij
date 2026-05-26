@@ -3175,6 +3175,7 @@ pub fn send_cli_new_pane_action_with_default_parameters() {
     );
     let cli_new_pane_action = CliAction::NewPane {
         direction: None,
+        target_pane: None,
         command: vec![],
         plugin: None,
         cwd: None,
@@ -3229,6 +3230,7 @@ pub fn send_cli_new_pane_action_with_split_direction() {
     );
     let cli_new_pane_action = CliAction::NewPane {
         direction: Some(Direction::Right),
+        target_pane: None,
         command: vec![],
         plugin: None,
         cwd: None,
@@ -3283,6 +3285,7 @@ pub fn send_cli_new_pane_action_with_command_and_cwd() {
     );
     let cli_new_pane_action = CliAction::NewPane {
         direction: Some(Direction::Right),
+        target_pane: None,
         command: vec!["htop".into()],
         plugin: None,
         cwd: Some("/some/folder".into()),
@@ -3348,6 +3351,7 @@ pub fn send_cli_new_pane_action_with_floating_pane_and_coordinates() {
     );
     let cli_new_pane_action = CliAction::NewPane {
         direction: Some(Direction::Right),
+        target_pane: None,
         command: vec!["htop".into()],
         plugin: None,
         cwd: Some("/some/folder".into()),
@@ -5169,6 +5173,7 @@ pub fn send_cli_new_pane_in_place_with_close_replaced_pane() {
     );
     let cli_action = CliAction::NewPane {
         direction: None,
+        target_pane: None,
         command: vec!["bash".into()],
         plugin: None,
         cwd: None,
@@ -7894,6 +7899,7 @@ pub fn send_cli_new_pane_action_with_tab_id() {
     );
     let cli_new_pane_action = CliAction::NewPane {
         direction: Some(Direction::Right),
+        target_pane: None,
         command: vec![],
         plugin: None,
         cwd: None,
@@ -7955,6 +7961,7 @@ pub fn send_cli_new_floating_pane_action_with_tab_id() {
     );
     let cli_new_pane_action = CliAction::NewPane {
         direction: None,
+        target_pane: None,
         command: vec![],
         plugin: None,
         cwd: None,
@@ -8064,6 +8071,7 @@ pub fn send_cli_new_pane_action_with_tab_id_and_direction() {
     );
     let cli_new_pane_action = CliAction::NewPane {
         direction: Some(Direction::Right),
+        target_pane: None,
         command: vec![],
         plugin: None,
         cwd: None,
@@ -8124,6 +8132,7 @@ pub fn send_cli_new_pane_action_with_tab_id_and_stacked() {
     );
     let cli_new_pane_action = CliAction::NewPane {
         direction: None,
+        target_pane: None,
         command: vec!["ls".into()],
         plugin: None,
         cwd: None,

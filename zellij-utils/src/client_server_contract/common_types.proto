@@ -478,6 +478,7 @@ message NewTiledPaneAction {
   bool near_current_pane = 7;
   optional bool borderless = 8;
   optional uint32 tab_id = 9;
+  optional NewPanePlacement placement = 10;
 }
 
 message NewInPlacePaneAction {
@@ -832,6 +833,7 @@ message NewPanePlacement {
     NoPreferencePlacement no_preference_with_options = 6;
     TiledPlacement tiled_with_options = 7;
     StackedPlacement stacked_with_options = 8;
+    TiledNearTargetPlacement tiled_near_target = 9;
   }
 }
 
@@ -842,6 +844,12 @@ message NoPreferencePlacement {
 message TiledPlacement {
   optional Direction direction = 1;
   optional bool borderless = 2;
+}
+
+message TiledNearTargetPlacement {
+  string target_pane = 1;
+  Direction direction = 2;
+  optional bool borderless = 3;
 }
 
 message StackedPlacement {

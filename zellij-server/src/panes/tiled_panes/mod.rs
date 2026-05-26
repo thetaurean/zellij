@@ -24,7 +24,7 @@ use zellij_utils::{
         command::RunCommand,
         layout::{Run, RunPluginOrAlias, SplitDirection},
     },
-    pane_size::{Offset, PaneGeom, Size, SizeInPixels, Viewport},
+    pane_size::{Dimension, Offset, PaneGeom, Size, SizeInPixels, Viewport},
 };
 
 use std::{
@@ -750,6 +750,222 @@ impl TiledPanes {
             self.panes.insert(pid, new_pane);
             self.relayout(SplitDirection::Horizontal);
         }
+    }
+    fn pane_group_split_near_pane_id(
+        &self,
+        target_pane_id: PaneId,
+        direction: Direction,
+    ) -> Option<(Vec<(PaneId, PaneGeom)>, PaneGeom, PaneGeom, SplitDirection)> {
+        let Some(target_geom) = self
+            .panes
+            .get(&target_pane_id)
+            .map(|pane| pane.position_and_size())
+        else {
+            return None;
+        };
+
+        let grouped_pane_ids_and_geoms: Vec<(PaneId, PaneGeom)> =
+            if let Some(target_stack_id) = target_geom.stacked {
+                self.panes
+                    .iter()
+                    .filter(|(id, _)| !self.panes_to_hide.contains(id))
+                    .filter_map(|(id, pane)| {
+                        let geom = pane.position_and_size();
+                        (geom.stacked == Some(target_stack_id)).then_some((*id, geom))
+                    })
+                    .collect()
+            } else {
+                self.panes
+                    .iter()
+                    .filter(|(id, _)| !self.panes_to_hide.contains(id))
+                    .filter_map(|(id, pane)| {
+                        let geom = pane.position_and_size();
+                        let same_group = match direction {
+                            Direction::Left | Direction::Right => {
+                                geom.x == target_geom.x && geom.cols == target_geom.cols
+                            },
+                            Direction::Up | Direction::Down => {
+                                geom.x == target_geom.x
+                                    && geom.cols == target_geom.cols
+                                    && geom.y == target_geom.y
+                                    && geom.rows == target_geom.rows
+                            },
+                        };
+                        same_group.then_some((*id, geom))
+                    })
+                    .collect()
+            };
+
+        if grouped_pane_ids_and_geoms.is_empty() {
+            return None;
+        }
+
+        let min_x = grouped_pane_ids_and_geoms
+            .iter()
+            .map(|(_, geom)| geom.x)
+            .min()
+            .unwrap_or(target_geom.x);
+        let max_x = grouped_pane_ids_and_geoms
+            .iter()
+            .map(|(_, geom)| geom.x + geom.cols.as_usize())
+            .max()
+            .unwrap_or(target_geom.x + target_geom.cols.as_usize());
+        let min_y = grouped_pane_ids_and_geoms
+            .iter()
+            .map(|(_, geom)| geom.y)
+            .min()
+            .unwrap_or(target_geom.y);
+        let max_y = grouped_pane_ids_and_geoms
+            .iter()
+            .map(|(_, geom)| geom.y + geom.rows.as_usize())
+            .max()
+            .unwrap_or(target_geom.y + target_geom.rows.as_usize());
+
+        let mut group_geom = target_geom;
+        group_geom.x = min_x;
+        group_geom.y = min_y;
+        if target_geom.stacked.is_some() {
+            let group_cols = max_x.saturating_sub(min_x);
+            let group_rows = max_y.saturating_sub(min_y);
+            if group_geom.cols.as_percent().is_none() {
+                group_geom.cols = Dimension::percent(100.0);
+            }
+            if group_geom.rows.as_percent().is_none() {
+                group_geom.rows = Dimension::percent(100.0);
+            }
+            group_geom.cols.set_inner(group_cols);
+            group_geom.rows.set_inner(group_rows);
+        } else {
+            match direction {
+                Direction::Left | Direction::Right => {
+                    group_geom.rows = Dimension::fixed(max_y.saturating_sub(min_y));
+                },
+                Direction::Up | Direction::Down => {
+                    group_geom.cols = Dimension::fixed(max_x.saturating_sub(min_x));
+                },
+            }
+        }
+        group_geom.stacked = None;
+
+        let split_direction = match direction {
+            Direction::Left | Direction::Right => SplitDirection::Vertical,
+            Direction::Up | Direction::Down => SplitDirection::Horizontal,
+        };
+        let has_enough_space = match split_direction {
+            SplitDirection::Vertical => group_geom.cols.as_usize() >= MIN_TERMINAL_WIDTH * 2,
+            SplitDirection::Horizontal => group_geom.rows.as_usize() >= MIN_TERMINAL_HEIGHT * 2,
+        };
+        if !has_enough_space {
+            return None;
+        }
+
+        let Some((mut first_geom, mut second_geom)) = split(split_direction, &group_geom) else {
+            return None;
+        };
+        match split_direction {
+            SplitDirection::Vertical => {
+                let first_cols = group_geom.cols.as_usize() / 2;
+                let second_cols = group_geom.cols.as_usize().saturating_sub(first_cols);
+                first_geom.cols.set_inner(first_cols);
+                second_geom.x = first_geom.x + first_cols;
+                second_geom.cols.set_inner(second_cols);
+            },
+            SplitDirection::Horizontal => {
+                let first_rows = group_geom.rows.as_usize() / 2;
+                let second_rows = group_geom.rows.as_usize().saturating_sub(first_rows);
+                first_geom.rows.set_inner(first_rows);
+                second_geom.y = first_geom.y + first_rows;
+                second_geom.rows.set_inner(second_rows);
+            },
+        }
+
+        let (group_side_geom, new_pane_geom) = match direction {
+            Direction::Right | Direction::Down => (first_geom, second_geom),
+            Direction::Left | Direction::Up => (second_geom, first_geom),
+        };
+
+        Some((
+            grouped_pane_ids_and_geoms,
+            group_side_geom,
+            new_pane_geom,
+            split_direction,
+        ))
+    }
+    pub fn can_insert_pane_near_pane_id(
+        &self,
+        target_pane_id: PaneId,
+        direction: Direction,
+    ) -> bool {
+        self.pane_group_split_near_pane_id(target_pane_id, direction)
+            .is_some()
+    }
+    pub fn pane_ids_in_insert_group_near_pane_id(
+        &self,
+        target_pane_id: PaneId,
+        direction: Direction,
+    ) -> Option<HashSet<PaneId>> {
+        self.pane_group_split_near_pane_id(target_pane_id, direction)
+            .map(|(pane_ids_and_geoms, _, _, _)| {
+                pane_ids_and_geoms
+                    .into_iter()
+                    .map(|(pane_id, _)| pane_id)
+                    .collect()
+            })
+    }
+    pub fn insert_pane_near_pane_id(
+        &mut self,
+        target_pane_id: PaneId,
+        pane_id: PaneId,
+        mut new_pane: Box<dyn Pane>,
+        direction: Direction,
+    ) -> bool {
+        let Some((grouped_pane_ids_and_geoms, group_side_geom, new_pane_geom, split_direction)) =
+            self.pane_group_split_near_pane_id(target_pane_id, direction)
+        else {
+            return false;
+        };
+
+        let mut resized_stack_ids = HashSet::new();
+        for (id, _) in grouped_pane_ids_and_geoms {
+            let stack_id = self
+                .panes
+                .get(&id)
+                .and_then(|pane| pane.position_and_size().stacked);
+            if let Some(stack_id) = stack_id {
+                if resized_stack_ids.insert(stack_id) {
+                    match StackedPanes::new_from_btreemap(&mut self.panes, &self.panes_to_hide)
+                        .resize_panes_in_stack(&id, group_side_geom)
+                    {
+                        Ok(_) => {},
+                        Err(e) => {
+                            log::error!("Failed to resize stack near target pane: {}", e);
+                        },
+                    }
+                }
+            } else if let Some(pane) = self.panes.get_mut(&id) {
+                let mut geom = pane.position_and_size();
+                match direction {
+                    Direction::Left | Direction::Right => {
+                        geom.x = group_side_geom.x;
+                        geom.cols = group_side_geom.cols;
+                    },
+                    Direction::Up | Direction::Down => {
+                        geom.y = group_side_geom.y;
+                        geom.rows = group_side_geom.rows;
+                    },
+                }
+                pane.set_geom(geom);
+            }
+        }
+
+        new_pane.set_geom(new_pane_geom);
+        self.panes.insert(pane_id, new_pane);
+        match split_direction {
+            SplitDirection::Vertical => self.relayout(SplitDirection::Horizontal),
+            SplitDirection::Horizontal => self.relayout(SplitDirection::Vertical),
+        }
+        self.reapply_pane_frames();
+        true
     }
     pub fn focus_pane_for_all_clients(&mut self, pane_id: PaneId) {
         let connected_clients: Vec<ClientId> =

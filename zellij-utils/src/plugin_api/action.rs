@@ -380,20 +380,24 @@ impl TryFrom<ProtobufAction> for Action {
                         let pane_name = payload.pane_name.clone();
                         let run_command_action: RunCommandAction = payload.try_into()?;
                         Ok(Action::NewTiledPane {
-                            direction,
+                            placement: NewPanePlacement::Tiled {
+                                direction,
+                                borderless,
+                            },
                             command: Some(run_command_action),
                             pane_name,
                             near_current_pane,
-                            borderless,
                             tab_id: None,
                         })
                     } else {
                         Ok(Action::NewTiledPane {
-                            direction,
+                            placement: NewPanePlacement::Tiled {
+                                direction,
+                                borderless,
+                            },
                             command: None,
                             pane_name: None,
                             near_current_pane,
-                            borderless,
                             tab_id: None,
                         })
                     }
@@ -1367,11 +1371,14 @@ impl TryFrom<Action> for ProtobufAction {
                 })
             },
             Action::NewTiledPane {
-                direction,
+                placement:
+                    NewPanePlacement::Tiled {
+                        direction,
+                        borderless,
+                    },
                 command: run_command_action,
                 pane_name,
                 near_current_pane,
-                borderless,
                 ..
             } => {
                 let direction = direction.and_then(|direction| {
@@ -1397,6 +1404,11 @@ impl TryFrom<Action> for ProtobufAction {
                     )),
                 })
             },
+            Action::NewTiledPane {
+                placement: NewPanePlacement::TiledNearTarget { .. },
+                ..
+            } => Err("NewTiledPane target_pane is not supported in plugin API protobuf"),
+            Action::NewTiledPane { .. } => Err("NewTiledPane received non-tiled placement"),
             Action::TogglePaneEmbedOrFloating => Ok(ProtobufAction {
                 name: ProtobufActionName::TogglePaneEmbedOrFloating as i32,
                 optional_payload: None,
@@ -2509,6 +2521,9 @@ impl TryFrom<NewPanePlacement> for ProtobufNewPanePlacement {
                     direction,
                     borderless,
                 }))
+            },
+            NewPanePlacement::TiledNearTarget { .. } => {
+                return Err("TiledNearTarget is not supported in plugin API protobuf");
             },
             NewPanePlacement::Floating(coords) => {
                 let coordinates = coords.and_then(|c| c.try_into().ok());

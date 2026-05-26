@@ -1172,20 +1172,31 @@ impl From<crate::input::actions::Action>
                 tab_id: tab_id.map(|t| t as u32),
             }),
             crate::input::actions::Action::NewTiledPane {
-                direction,
+                placement,
                 command,
                 pane_name,
                 near_current_pane,
-                borderless,
                 tab_id,
                 ..
             } => ActionType::NewTiledPane(NewTiledPaneAction {
-                direction: direction.map(|d| direction_to_proto_i32(d)),
+                direction: match &placement {
+                    crate::data::NewPanePlacement::Tiled { direction, .. } => {
+                        direction.map(|d| direction_to_proto_i32(d))
+                    },
+                    _ => None,
+                },
                 command: command.map(|c| c.into()),
                 pane_name,
                 near_current_pane,
-                borderless,
+                borderless: match &placement {
+                    crate::data::NewPanePlacement::Tiled { borderless, .. }
+                    | crate::data::NewPanePlacement::TiledNearTarget { borderless, .. } => {
+                        *borderless
+                    },
+                    _ => None,
+                },
                 tab_id: tab_id.map(|t| t as u32),
+                placement: Some(placement.into()),
             }),
             crate::input::actions::Action::NewInPlacePane {
                 command,
@@ -2025,15 +2036,32 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                 })
             },
             ActionType::NewTiledPane(new_tiled_action) => {
+                let placement = match new_tiled_action.placement {
+                    Some(placement) => {
+                        let placement = placement.try_into()?;
+                        match placement {
+                            crate::data::NewPanePlacement::Tiled { .. }
+                            | crate::data::NewPanePlacement::TiledNearTarget { .. } => placement,
+                            _ => {
+                                return Err(anyhow!(
+                                    "new_tiled_pane placement must be tiled or tiled_near_target"
+                                ));
+                            },
+                        }
+                    },
+                    None => crate::data::NewPanePlacement::Tiled {
+                        direction: new_tiled_action
+                            .direction
+                            .map(|d| proto_i32_to_direction(d))
+                            .transpose()?,
+                        borderless: new_tiled_action.borderless,
+                    },
+                };
                 Ok(crate::input::actions::Action::NewTiledPane {
-                    direction: new_tiled_action
-                        .direction
-                        .map(|d| proto_i32_to_direction(d))
-                        .transpose()?,
+                    placement,
                     command: new_tiled_action.command.map(|c| c.try_into()).transpose()?,
                     pane_name: new_tiled_action.pane_name,
                     near_current_pane: new_tiled_action.near_current_pane,
-                    borderless: new_tiled_action.borderless,
                     tab_id: new_tiled_action.tab_id.map(|t| t as usize),
                 })
             },
@@ -3413,7 +3441,7 @@ impl From<crate::data::NewPanePlacement>
     fn from(placement: crate::data::NewPanePlacement) -> Self {
         use crate::client_server_contract::client_server_contract::new_pane_placement::PlacementType;
         use crate::client_server_contract::client_server_contract::{
-            NoPreferencePlacement, StackedPlacement, TiledPlacement,
+            NoPreferencePlacement, StackedPlacement, TiledNearTargetPlacement, TiledPlacement,
         };
         let placement_type = match placement {
             crate::data::NewPanePlacement::NoPreference {
@@ -3435,6 +3463,15 @@ impl From<crate::data::NewPanePlacement>
                 direction,
                 borderless: None,
             } => PlacementType::Tiled(direction.map(direction_to_proto_i32).unwrap_or(0)),
+            crate::data::NewPanePlacement::TiledNearTarget {
+                target_pane,
+                direction,
+                borderless,
+            } => PlacementType::TiledNearTarget(TiledNearTargetPlacement {
+                target_pane,
+                direction: direction_to_proto_i32(direction),
+                borderless,
+            }),
             crate::data::NewPanePlacement::Floating(coords) => {
                 PlacementType::Floating(coords.map(|c| c.into()).unwrap_or_default())
             },
@@ -3504,6 +3541,13 @@ impl TryFrom<crate::client_server_contract::client_server_contract::NewPanePlace
                     .transpose()?;
                 Ok(crate::data::NewPanePlacement::Stacked {
                     pane_id_to_stack_under: pane_id,
+                    borderless: opts.borderless,
+                })
+            },
+            PlacementType::TiledNearTarget(opts) => {
+                Ok(crate::data::NewPanePlacement::TiledNearTarget {
+                    target_pane: opts.target_pane,
+                    direction: proto_i32_to_direction(opts.direction)?,
                     borderless: opts.borderless,
                 })
             },

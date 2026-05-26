@@ -1705,11 +1705,13 @@ fn open_terminal(env: &PluginEnv, cwd: PathBuf) {
         _ => None,
     };
     let action = Action::NewTiledPane {
-        direction: None,
+        placement: NewPanePlacement::Tiled {
+            direction: None,
+            borderless: None,
+        },
         command: run_command_action,
         pane_name: None,
         near_current_pane: false,
-        borderless: None,
         tab_id: None,
     };
     let result = apply_action!(action, error_msg, env);
@@ -2142,11 +2144,13 @@ fn open_command_pane(
         use_terminal_title,
     };
     let action = Action::NewTiledPane {
-        direction,
+        placement: NewPanePlacement::Tiled {
+            direction,
+            borderless: None,
+        },
         command: Some(run_command_action),
         pane_name: name,
         near_current_pane: false,
-        borderless: None,
         tab_id: None,
     };
     let result = apply_action!(action, error_msg, env);

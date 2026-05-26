@@ -54,7 +54,7 @@ use std::rc::Rc;
 use std::time::Instant;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    str,
+    str::{self, FromStr},
 };
 use zellij_utils::{
     data::{Event, FloatingPaneCoordinates, InputMode, ModeInfo, Palette, PaletteColor, Styling},
@@ -1532,6 +1532,22 @@ impl Tab {
                 }
                 Ok(())
             },
+            NewPanePlacement::TiledNearTarget {
+                target_pane,
+                direction,
+                borderless,
+            } => self.new_tiled_pane_near_target(
+                pid,
+                initial_pane_title,
+                invoked_with,
+                start_suppressed,
+                should_focus_pane,
+                target_pane,
+                direction,
+                client_id,
+                blocking_notification,
+                borderless,
+            ),
             NewPanePlacement::Floating(floating_pane_coordinates) => self.new_floating_pane(
                 pid,
                 initial_pane_title,
@@ -1783,6 +1799,175 @@ impl Tab {
         } else {
             self.add_tiled_pane(new_pane, pid, false, client_id)
         }
+    }
+    pub fn new_tiled_pane_near_target(
+        &mut self,
+        pid: PaneId,
+        initial_pane_title: Option<String>,
+        invoked_with: Option<Run>,
+        start_suppressed: bool,
+        should_focus_pane: bool,
+        target_pane: String,
+        direction: Direction,
+        client_id: Option<ClientId>,
+        blocking_notification: Option<NotificationEnd>,
+        borderless: Option<bool>,
+    ) -> Result<()> {
+        let err_context =
+            || format!("failed to create new pane with id {pid:?} near target {target_pane}");
+        let target_pane_id = if start_suppressed {
+            None
+        } else {
+            match self.resolve_insertable_tiled_target_pane_id(&target_pane, direction) {
+                Ok((target_pane_id, protected_pane_ids)) => {
+                    Some((target_pane_id, protected_pane_ids))
+                },
+                Err(error_message) => {
+                    self.close_new_pane_with_error(
+                        pid,
+                        blocking_notification,
+                        error_message.clone(),
+                    )
+                    .with_context(err_context)?;
+                    return Err(anyhow!(error_message)).with_context(err_context);
+                },
+            }
+        };
+        if should_focus_pane {
+            self.hide_floating_panes();
+        }
+        match &target_pane_id {
+            Some((_, protected_pane_ids)) => {
+                if let Err(error_message) =
+                    self.close_down_to_max_terminals_excluding(protected_pane_ids)
+                {
+                    self.close_new_pane_with_error(
+                        pid,
+                        blocking_notification,
+                        error_message.clone(),
+                    )
+                    .with_context(err_context)?;
+                    return Err(anyhow!(error_message)).with_context(err_context);
+                }
+                if let Err(error_message) =
+                    self.resolve_insertable_tiled_target_pane_id(&target_pane, direction)
+                {
+                    self.close_new_pane_with_error(
+                        pid,
+                        blocking_notification,
+                        error_message.clone(),
+                    )
+                    .with_context(err_context)?;
+                    return Err(anyhow!(error_message)).with_context(err_context);
+                }
+            },
+            None => self
+                .close_down_to_max_terminals()
+                .with_context(err_context)?,
+        }
+        let mut new_pane = match pid {
+            PaneId::Terminal(term_pid) => {
+                let next_terminal_position = self.get_next_terminal_position();
+                Box::new(TerminalPane::new(
+                    term_pid,
+                    PaneGeom::default(),
+                    self.style,
+                    next_terminal_position,
+                    initial_pane_title.clone().unwrap_or_default(),
+                    self.link_handler.clone(),
+                    self.character_cell_size.clone(),
+                    self.sixel_image_store.clone(),
+                    self.terminal_emulator_colors.clone(),
+                    self.terminal_emulator_color_codes.clone(),
+                    initial_pane_title,
+                    invoked_with,
+                    self.debug,
+                    self.arrow_fonts,
+                    self.styled_underlines,
+                    self.osc8_hyperlinks,
+                    self.explicitly_disable_kitty_keyboard_protocol,
+                    blocking_notification,
+                )) as Box<dyn Pane>
+            },
+            PaneId::Plugin(plugin_pid) => Box::new(PluginPane::new(
+                plugin_pid,
+                PaneGeom::default(),
+                self.senders
+                    .to_plugin
+                    .as_ref()
+                    .with_context(err_context)?
+                    .clone(),
+                initial_pane_title.unwrap_or("".to_owned()),
+                String::new(),
+                self.sixel_image_store.clone(),
+                self.terminal_emulator_colors.clone(),
+                self.terminal_emulator_color_codes.clone(),
+                self.link_handler.clone(),
+                self.character_cell_size.clone(),
+                self.connected_clients_in_app
+                    .borrow()
+                    .keys()
+                    .copied()
+                    .collect(),
+                self.style,
+                invoked_with,
+                self.debug,
+                self.arrow_fonts,
+                self.styled_underlines,
+            )) as Box<dyn Pane>,
+        };
+
+        if let Some(borderless) = borderless {
+            new_pane.set_borderless(borderless);
+        }
+
+        if start_suppressed {
+            let viewport = { self.viewport.borrow().clone() };
+            let new_pane_geom = half_size_middle_geom(&viewport, 0);
+            new_pane.set_active_at(Instant::now());
+            new_pane.set_geom(new_pane_geom);
+            new_pane.set_content_offset(Offset::frame(1));
+            resize_pty!(
+                new_pane,
+                self.os_api,
+                self.senders,
+                self.character_cell_size
+            )
+            .with_context(err_context)?;
+            let is_scrollback_editor = false;
+            self.suppressed_panes
+                .insert(pid, (is_scrollback_editor, new_pane));
+            return Ok(());
+        }
+
+        let (target_pane_id, _) = target_pane_id.expect("target pane id checked above");
+
+        if self.tiled_panes.fullscreen_is_active() {
+            self.tiled_panes.unset_fullscreen();
+        }
+        new_pane.set_active_at(Instant::now());
+        if self
+            .tiled_panes
+            .insert_pane_near_pane_id(target_pane_id, pid, new_pane, direction)
+        {
+            self.set_should_clear_display_before_rendering();
+            if should_focus_pane {
+                if let Some(client_id) = client_id {
+                    self.tiled_panes.focus_pane(pid, client_id);
+                }
+            }
+            self.swap_layouts.set_is_tiled_damaged();
+        } else {
+            log::error!(
+                "Could not insert pane {:?} near target pane {:?}",
+                pid,
+                target_pane_id
+            );
+            self.senders
+                .send_to_pty(PtyInstruction::ClosePane(pid, None))
+                .with_context(err_context)?;
+        }
+        Ok(())
     }
     pub fn new_floating_pane(
         &mut self,
@@ -2679,6 +2864,71 @@ impl Tab {
                 .suppressed_panes
                 .values()
                 .any(|s_p| s_p.1.pid() == *pid)
+    }
+    pub fn targeted_new_tiled_pane_error(
+        &self,
+        target_pane: &str,
+        direction: Direction,
+    ) -> Option<String> {
+        self.resolve_insertable_tiled_target_pane_id(target_pane, direction)
+            .err()
+    }
+    fn resolve_insertable_tiled_target_pane_id(
+        &self,
+        target_pane: &str,
+        direction: Direction,
+    ) -> Result<(PaneId, HashSet<PaneId>), String> {
+        let Some(target_pane_id) = self.resolve_tiled_target_pane_id(target_pane) else {
+            return Err(format!("Could not find tiled target pane: {target_pane}"));
+        };
+        let Some(protected_pane_ids) = self
+            .tiled_panes
+            .pane_ids_in_insert_group_near_pane_id(target_pane_id, direction)
+        else {
+            return Err(format!(
+                "Could not insert pane near target pane {:?}",
+                target_pane_id
+            ));
+        };
+        if protected_pane_ids.is_empty() {
+            return Err(format!(
+                "Could not insert pane near target pane {:?}",
+                target_pane_id
+            ));
+        }
+        Ok((target_pane_id, protected_pane_ids))
+    }
+    fn close_new_pane_with_error(
+        &mut self,
+        pid: PaneId,
+        mut completion: Option<NotificationEnd>,
+        error_message: String,
+    ) -> Result<()> {
+        log::error!("{}", error_message);
+        if let Some(completion) = completion.as_mut() {
+            completion.set_error_message(error_message);
+        }
+        self.senders
+            .send_to_pty(PtyInstruction::ClosePane(pid, completion))
+    }
+    fn resolve_tiled_target_pane_id(&self, target_pane: &str) -> Option<PaneId> {
+        if let Ok(parsed_pane_id) = zellij_utils::data::PaneId::from_str(target_pane) {
+            let pane_id: PaneId = parsed_pane_id.into();
+            if self.tiled_panes.panes_contain(&pane_id) {
+                return Some(pane_id);
+            }
+        }
+        self.tiled_panes.panes.iter().find_map(|(pane_id, pane)| {
+            let matches_custom_title = pane
+                .custom_title()
+                .map(|custom_title| custom_title == target_pane)
+                .unwrap_or(false);
+            if matches_custom_title || pane.current_title() == target_pane {
+                Some(*pane_id)
+            } else {
+                None
+            }
+        })
     }
     pub fn has_non_suppressed_pane_with_pid(&self, pid: &PaneId) -> bool {
         self.tiled_panes.panes_contain(pid) || self.floating_panes.panes_contain(pid)
@@ -3886,6 +4136,38 @@ impl Tab {
                     .context("failed to close down to max terminals")?;
                 self.close_pane(pid, false, None);
             }
+        }
+        Ok(())
+    }
+    fn close_down_to_max_terminals_excluding(
+        &mut self,
+        protected_pane_ids: &HashSet<PaneId>,
+    ) -> Result<(), String> {
+        let Some(max_panes) = self.max_panes else {
+            return Ok(());
+        };
+        let terminals = self.get_tiled_pane_ids();
+        let panes_to_keep = max_panes.saturating_sub(1);
+        let panes_to_close = terminals.len().saturating_sub(panes_to_keep);
+        if panes_to_close == 0 {
+            return Ok(());
+        }
+        let pane_ids_to_close: Vec<PaneId> = terminals
+            .iter()
+            .skip(panes_to_keep)
+            .chain(terminals.iter().take(panes_to_keep))
+            .filter(|pane_id| !protected_pane_ids.contains(pane_id))
+            .take(panes_to_close)
+            .copied()
+            .collect();
+        if pane_ids_to_close.len() < panes_to_close {
+            return Err("Could not make room for targeted pane without closing target pane".into());
+        }
+        for pid in pane_ids_to_close {
+            self.senders
+                .send_to_pty(PtyInstruction::ClosePane(pid, None))
+                .map_err(|_| "failed to close down to max terminals".to_string())?;
+            self.close_pane(pid, false, None);
         }
         Ok(())
     }

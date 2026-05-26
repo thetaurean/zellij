@@ -3245,6 +3245,11 @@ pub enum NewPanePlacement {
         direction: Option<Direction>,
         borderless: Option<bool>,
     },
+    TiledNearTarget {
+        target_pane: String,
+        direction: Direction,
+        borderless: Option<bool>,
+    },
     Floating(Option<FloatingPaneCoordinates>),
     InPlace {
         pane_id_to_replace: Option<PaneId>,
@@ -3297,7 +3302,9 @@ impl NewPanePlacement {
     pub fn should_float(&self) -> Option<bool> {
         match self {
             NewPanePlacement::Floating(_) => Some(true),
-            NewPanePlacement::Tiled { .. } => Some(false),
+            NewPanePlacement::Tiled { .. } | NewPanePlacement::TiledNearTarget { .. } => {
+                Some(false)
+            },
             _ => None,
         }
     }
@@ -3328,6 +3335,7 @@ impl NewPanePlacement {
         match self {
             NewPanePlacement::NoPreference { borderless } => *borderless,
             NewPanePlacement::Tiled { borderless, .. } => *borderless,
+            NewPanePlacement::TiledNearTarget { borderless, .. } => *borderless,
             NewPanePlacement::Floating(coords) => coords.as_ref().and_then(|c| c.borderless),
             NewPanePlacement::InPlace { borderless, .. } => *borderless,
             NewPanePlacement::Stacked { borderless, .. } => *borderless,
