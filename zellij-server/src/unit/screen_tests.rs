@@ -5542,7 +5542,7 @@ fn subscriber_error_for_nonexistent_pane() {
     let client_msgs = msgs.get(&100).unwrap();
     assert_eq!(client_msgs.len(), 1);
     match &client_msgs[0] {
-        ServerToClientMsg::LogError { lines } => {
+        ServerToClientMsg::LogError { lines, .. } => {
             let joined = lines.join(" ");
             assert!(
                 joined.contains("not found"),

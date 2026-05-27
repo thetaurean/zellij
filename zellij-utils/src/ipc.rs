@@ -189,6 +189,9 @@ pub enum ServerToClientMsg {
     },
     LogError {
         lines: Vec<String>,
+        /// Optional exit status for `zellij action` CLI clients. None → default exit 2
+        /// (preserves pre-Patch-2 behavior). Some(n) → process::exit(n) on the client.
+        exit_status: Option<i32>,
     },
     SwitchSession {
         connect_to_session: ConnectToSession,

@@ -5367,6 +5367,7 @@ impl Screen {
                         subscriber_client_id,
                         ServerToClientMsg::LogError {
                             lines: vec![format!("Pane {} not found", pane_id)],
+                            exit_status: None,
                         },
                     );
                 }
@@ -8751,6 +8752,7 @@ pub(crate) fn screen_thread_main(
                             client_id,
                             ServerToClientMsg::LogError {
                                 lines: vec![error_text.to_owned()],
+                                exit_status: None,
                             },
                         );
                     }
@@ -8763,6 +8765,7 @@ pub(crate) fn screen_thread_main(
                             client_id,
                             ServerToClientMsg::LogError {
                                 lines: vec![error_text.to_owned()],
+                                exit_status: None,
                             },
                         );
                     }

@@ -47,6 +47,7 @@ message LogMsg {
 
 message LogErrorMsg {
   repeated string lines = 1;
+  optional int32 exit_status = 2;
 }
 
 message SwitchSessionMsg {

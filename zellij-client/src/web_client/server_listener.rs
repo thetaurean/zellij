@@ -183,7 +183,7 @@ pub fn zellij_server_listener(
                                     WebServerToWebClientControlMessage::Log { lines },
                                 );
                             },
-                            Some(ServerToClientMsg::LogError{lines}) => {
+                            Some(ServerToClientMsg::LogError{lines, ..}) => {
                                 client_connection_bus.send_control(
                                     WebServerToWebClientControlMessage::LogError { lines },
                                 );

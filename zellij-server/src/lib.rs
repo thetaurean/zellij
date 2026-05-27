@@ -1600,7 +1600,8 @@ pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
                     client_id,
                     os_input,
                     ServerToClientMsg::LogError {
-                        lines: lines_to_log
+                        lines: lines_to_log,
+                        exit_status: None,
                     },
                     session_state,
                     session_data

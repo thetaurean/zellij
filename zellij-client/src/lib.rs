@@ -196,7 +196,7 @@ impl From<ServerToClientMsg> for ClientInstruction {
             ServerToClientMsg::UnblockInputThread => ClientInstruction::UnblockInputThread,
             ServerToClientMsg::Connected => ClientInstruction::Connected,
             ServerToClientMsg::Log { lines } => ClientInstruction::Log(lines),
-            ServerToClientMsg::LogError { lines } => ClientInstruction::LogError(lines),
+            ServerToClientMsg::LogError { lines, .. } => ClientInstruction::LogError(lines),
             ServerToClientMsg::SwitchSession { connect_to_session } => {
                 ClientInstruction::SwitchSession(connect_to_session)
             },

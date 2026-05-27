@@ -185,9 +185,9 @@ fn pipe_client(
                     log_lines.iter().for_each(|line| println!("{line}"));
                     process::exit(0);
                 },
-                Some((ServerToClientMsg::LogError { lines: log_lines }, _)) => {
+                Some((ServerToClientMsg::LogError { lines: log_lines, exit_status }, _)) => {
                     log_lines.iter().for_each(|line| eprintln!("{line}"));
-                    process::exit(2);
+                    process::exit(exit_status.unwrap_or(2));
                 },
                 Some((ServerToClientMsg::Exit { exit_reason }, _)) => match exit_reason {
                     ExitReason::Error(e) => {
@@ -232,9 +232,9 @@ fn individual_messages_client(
                 log_lines.iter().for_each(|line| println!("{line}"));
                 break;
             },
-            Some((ServerToClientMsg::LogError { lines: log_lines }, _)) => {
+            Some((ServerToClientMsg::LogError { lines: log_lines, exit_status }, _)) => {
                 log_lines.iter().for_each(|line| eprintln!("{line}"));
-                process::exit(2);
+                process::exit(exit_status.unwrap_or(2));
             },
             Some((ServerToClientMsg::Exit { exit_reason }, _)) => match exit_reason {
                 ExitReason::Error(e) => {
@@ -346,11 +346,11 @@ pub fn start_subscribe_client(
                 }
             },
             Some((ServerToClientMsg::Exit { .. }, _)) => break,
-            Some((ServerToClientMsg::LogError { lines }, _)) => {
+            Some((ServerToClientMsg::LogError { lines, exit_status }, _)) => {
                 for line in lines {
                     eprintln!("{}", line);
                 }
-                process::exit(2);
+                process::exit(exit_status.unwrap_or(2));
             },
             None => break,
             _ => {},

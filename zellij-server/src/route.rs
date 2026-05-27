@@ -2079,6 +2079,7 @@ pub(crate) fn route_action(
                     cli_client_id,
                     ServerToClientMsg::LogError {
                         lines: vec![error_message.clone()],
+                        exit_status: result.exit_status,
                     },
                 );
             }
@@ -3104,6 +3105,7 @@ fn send_error_to_client(
                 cli_client_id,
                 ServerToClientMsg::LogError {
                     lines: vec![error_message.to_string()],
+                    exit_status: None,
                 },
             );
         }

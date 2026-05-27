@@ -321,8 +321,8 @@ impl From<ServerToClientMsg> for ProtoServerToClientMsg {
             ServerToClientMsg::Log { lines } => {
                 server_to_client_msg::Message::Log(LogMsg { lines })
             },
-            ServerToClientMsg::LogError { lines } => {
-                server_to_client_msg::Message::LogError(LogErrorMsg { lines })
+            ServerToClientMsg::LogError { lines, exit_status } => {
+                server_to_client_msg::Message::LogError(LogErrorMsg { lines, exit_status })
             },
             ServerToClientMsg::SwitchSession { connect_to_session } => {
                 server_to_client_msg::Message::SwitchSession(SwitchSessionMsg {
@@ -421,6 +421,7 @@ impl TryFrom<ProtoServerToClientMsg> for ServerToClientMsg {
             Some(server_to_client_msg::Message::LogError(log_error)) => {
                 Ok(ServerToClientMsg::LogError {
                     lines: log_error.lines,
+                    exit_status: log_error.exit_status,
                 })
             },
             Some(server_to_client_msg::Message::SwitchSession(switch)) => {

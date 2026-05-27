@@ -3204,6 +3204,8 @@ pub struct LogMsg {
 pub struct LogErrorMsg {
     #[prost(string, repeated, tag="1")]
     pub lines: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(int32, optional, tag="2")]
+    pub exit_status: ::core::option::Option<i32>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

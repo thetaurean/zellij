@@ -3702,12 +3702,20 @@ fn test_server_messages() {
             "Accepting connections".to_string(),
         ],
     });
-    test_server_roundtrip!(ServerToClientMsg::LogError { lines: vec![] });
+    test_server_roundtrip!(ServerToClientMsg::LogError {
+        lines: vec![],
+        exit_status: None,
+    });
     test_server_roundtrip!(ServerToClientMsg::LogError {
         lines: vec![
             "ERROR: Failed to bind socket".to_string(),
             "ERROR: Retrying in 5 seconds".to_string(),
         ],
+        exit_status: None,
+    });
+    test_server_roundtrip!(ServerToClientMsg::LogError {
+        lines: vec!["source and target panes must be different".to_string()],
+        exit_status: Some(1),
     });
     test_server_roundtrip!(ServerToClientMsg::SwitchSession {
         connect_to_session: ConnectToSession::default(),
