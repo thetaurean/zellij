@@ -16858,3 +16858,451 @@ pub fn cli_rename_active_pane_then_interactive_esc_restores() {
     let pane = tab.get_pane_with_id(pane_id).unwrap();
     assert_eq!(pane.current_title(), "spark");
 }
+
+// ── move_pane_to_pane_id tests ────────────────────────────────────────────────
+//
+// Geometry conventions (120x20 tab, draw_pane_frames=true):
+//   vertical_split(T2)   -> T1=(0,0,60,20)  T2=(60,0,60,20)
+//   horizontal_split(T2) -> T1=(0,0,120,10) T2=(0,10,120,10)
+//
+// After each split the new pane is focused.
+//
+// move_pane_to_pane_id(source, target, direction):
+//   Left/Right  -- source becomes sibling of target's whole column-strip;
+//                  strip is halved horizontally.
+//   Up/Down     -- source lands inside target's individual slot only;
+//                  that slot is halved vertically.
+
+// ── Plan-required scenario 1 ──────────────────────────────────────────────────
+#[test]
+fn move_pane_top_level_targets_become_siblings() {
+    // Layout before move:
+    //   T1=(0,0,60,20)   [left column]
+    //   T2=(60,0,60,10)  [right-top]
+    //   T3=(60,10,60,10) [right-bottom]  <- source
+    //
+    // move_pane_to_pane_id(T3, T1, Right):
+    //   1. fill_space_over_pane(T3)  -> T2 expands to (60,0,60,20)
+    //   2. insert_pane_near_pane_id(T1, T3, Right)
+    //        T1's column-strip = {T1} at x=0, cols=60, rows=20
+    //        split 60 cols in half: group_side=left(30), new=right(30)
+    //   -> T1=(0,0,30,20)  T3=(30,0,30,20)  T2=(60,0,60,20)
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    // T2 is now active
+    tab.horizontal_split(PaneId::Terminal(3), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 10, 60, 10));
+
+    tab.move_pane_to_pane_id(PaneId::Terminal(3), PaneId::Terminal(1), Direction::Right)
+        .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 30, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (30, 0, 30, 20));
+    // T2 reabsorbed T3's old slot
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 20));
+}
+
+// ── Plan-required scenario 2 ──────────────────────────────────────────────────
+#[test]
+fn move_pane_into_vstack_takes_target_slot_only() {
+    // Layout before move:
+    //   T1=(0,0,120,10)  [top, full width]
+    //   T2=(0,10,60,10)  [bottom-left]
+    //   T3=(60,10,60,10) [bottom-right]  <- source
+    //
+    // move_pane_to_pane_id(T3, T1, Down):
+    //   1. fill_space_over_pane(T3) -> T2 expands to (0,10,120,10)
+    //   2. insert_pane_near_pane_id(T1, T3, Down)
+    //        T1's slot (Up/Down group) = {T1} at (0,0,120,10)
+    //        split 10 rows in half: first=5(group_side), second=5(new)
+    //   -> T1=(0,0,120,5)  T3=(0,5,120,5)  T2=(0,10,120,10)
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.horizontal_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    // T2 active at (0,10,120,10)
+    tab.vertical_split(PaneId::Terminal(3), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 10, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 10, 60, 10));
+
+    tab.move_pane_to_pane_id(PaneId::Terminal(3), PaneId::Terminal(1), Direction::Down)
+        .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 5));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 5, 120, 5));
+    // T2 reabsorbed T3's old slot
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 10, 120, 10));
+}
+
+// ── Plan-required scenario 3 ──────────────────────────────────────────────────
+#[test]
+fn move_pane_out_of_nested_to_top_level() {
+    // Layout before move:
+    //   T1=(0,0,60,20)   [left, full-height]  <- source (outside T2/T3's group)
+    //   T2=(60,0,60,10)  [right-top]           <- target
+    //   T3=(60,10,60,10) [right-bottom]
+    //
+    // move_pane_to_pane_id(T1, T2, Right):
+    //   1. fill_space_over_pane(T1) -> T2/T3 expand leftward to fill (0,0,120,*)
+    //        T2=(0,0,120,10)  T3=(0,10,120,10)
+    //   2. insert_pane_near_pane_id(T2, T1, Right)
+    //        T2's column-strip = {T2, T3} at x=0, cols=120, rows=20
+    //        split 120 cols in half: group_side=left(60), new=right(60)
+    //   -> T2=(0,0,60,10)  T3=(0,10,60,10)  T1=(60,0,60,20)
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    // T2 is now active
+    tab.horizontal_split(PaneId::Terminal(3), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 10, 60, 10));
+
+    tab.move_pane_to_pane_id(PaneId::Terminal(1), PaneId::Terminal(2), Direction::Right)
+        .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 0, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 10, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (60, 0, 60, 20));
+}
+
+// ── Error case 4: source == target ───────────────────────────────────────────
+#[test]
+fn move_pane_source_equals_target_returns_error() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    let result =
+        tab.move_pane_to_pane_id(PaneId::Terminal(1), PaneId::Terminal(1), Direction::Right);
+    assert!(result.is_err(), "expected Err when source == target");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("different"),
+        "error should mention 'different', got: {msg:?}"
+    );
+}
+
+// ── Error case 5: floating source ─────────────────────────────────────────────
+#[test]
+fn move_pane_floating_source_returns_error() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    // T1 is tiled (the initial pane). Create a floating pane T2.
+    tab.new_floating_pane(PaneId::Terminal(2), None, None, false, true, None, None)
+        .unwrap();
+
+    let result =
+        tab.move_pane_to_pane_id(PaneId::Terminal(2), PaneId::Terminal(1), Direction::Right);
+    assert!(
+        result.is_err(),
+        "expected Err when source is a floating pane"
+    );
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("floating") || msg.contains("tiled"),
+        "error should mention floating/tiled, got: {msg:?}"
+    );
+}
+
+// ── Error case 6: floating target ─────────────────────────────────────────────
+#[test]
+fn move_pane_floating_target_returns_error() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    // T1 is tiled. Create a floating pane T2.
+    tab.new_floating_pane(PaneId::Terminal(2), None, None, false, true, None, None)
+        .unwrap();
+
+    let result =
+        tab.move_pane_to_pane_id(PaneId::Terminal(1), PaneId::Terminal(2), Direction::Right);
+    assert!(
+        result.is_err(),
+        "expected Err when target is a floating pane"
+    );
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("floating") || msg.contains("tiled"),
+        "error should mention floating/tiled, got: {msg:?}"
+    );
+}
+
+// ── Error case 7: missing source ─────────────────────────────────────────────
+#[test]
+fn move_pane_missing_source_returns_error() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    let result =
+        tab.move_pane_to_pane_id(PaneId::Terminal(99), PaneId::Terminal(1), Direction::Right);
+    assert!(result.is_err(), "expected Err for non-existent source pane");
+}
+
+// ── Error case 8: missing target ─────────────────────────────────────────────
+#[test]
+fn move_pane_missing_target_returns_error() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+
+    let result =
+        tab.move_pane_to_pane_id(PaneId::Terminal(1), PaneId::Terminal(99), Direction::Right);
+    assert!(result.is_err(), "expected Err for non-existent target pane");
+}
+
+// ── Error case 9: source and target already in same column-strip ──────────────
+#[test]
+fn move_pane_same_group_returns_error() {
+    // T2 and T3 are both in the right column-strip (x=60, cols=60).
+    // A Right or Left move treats that strip as the group, so T2 is already
+    // inside T3's group (and vice-versa) -> bail with "same group".
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab.horizontal_split(PaneId::Terminal(3), None, 1, None, None)
+        .unwrap();
+    // T2=(60,0,60,10)  T3=(60,10,60,10) -- same column-strip
+
+    let result_right =
+        tab.move_pane_to_pane_id(PaneId::Terminal(2), PaneId::Terminal(3), Direction::Right);
+    assert!(
+        result_right.is_err(),
+        "expected Err: T2 and T3 are already in the same Right group"
+    );
+    let msg = result_right.unwrap_err();
+    assert!(
+        msg.contains("same group") || msg.contains("no-op"),
+        "error should mention 'same group' or 'no-op', got: {msg:?}"
+    );
+
+    let result_left =
+        tab.move_pane_to_pane_id(PaneId::Terminal(3), PaneId::Terminal(2), Direction::Left);
+    assert!(
+        result_left.is_err(),
+        "expected Err: T3 and T2 are already in the same Left group"
+    );
+}
+
+// ── Error case 10: stacked source ─────────────────────────────────────────────
+#[test]
+fn move_pane_with_stacked_source_returns_error() {
+    // Mirror the stacked construction from new_pane_down_of_stacked_target_splits_stack_as_unit.
+    // After stacking T2 under T1: T1=(0,0,120,1)[stacked], T2=(0,1,120,19)[stacked].
+    // Both panes have is_stacked()=true; moving a stacked pane should error.
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::Stacked {
+            pane_id_to_stack_under: Some(zellij_utils::data::PaneId::Terminal(1)),
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 1));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 1, 120, 19));
+
+    // T1 is stacked -- moving it should be rejected
+    let result =
+        tab.move_pane_to_pane_id(PaneId::Terminal(1), PaneId::Terminal(2), Direction::Right);
+    assert!(
+        result.is_err(),
+        "expected Err when source pane is stacked"
+    );
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("stacked") || msg.contains("not yet supported"),
+        "error should mention stacked/not-yet-supported, got: {msg:?}"
+    );
+}
+
+// ── Error case 11: fullscreen active ──────────────────────────────────────────
+#[test]
+fn move_pane_fullscreen_active_returns_error() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+
+    // Activate fullscreen on the currently active pane (T2)
+    tab.toggle_active_pane_fullscreen(1);
+    assert!(tab.tiled_panes.fullscreen_is_active());
+
+    let result =
+        tab.move_pane_to_pane_id(PaneId::Terminal(1), PaneId::Terminal(2), Direction::Right);
+    assert!(result.is_err(), "expected Err when fullscreen is active");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("fullscreen"),
+        "error should mention 'fullscreen', got: {msg:?}"
+    );
+}
+
+// ── Nice-to-have 12: stacked target succeeds and resizes ──────────────────────
+#[test]
+fn move_pane_with_stacked_target_succeeds() {
+    // Stack setup: T1=(0,0,120,1)[stacked], T2=(0,1,120,19)[stacked].
+    // Then add T3 as a tiled pane below the stack via TiledNearTarget Down,
+    // matching the reference test new_pane_down_of_stacked_target_splits_stack_as_unit.
+    // After that reference step: T1=(0,0,120,1), T2=(0,1,120,9), T3=(0,10,120,10).
+    //
+    // Now add a tiled non-stacked sibling T4 via vertical_split on T3, giving:
+    //   T3=(0,10,60,10)  T4=(60,10,60,10)
+    //
+    // move_pane_to_pane_id(T4, T1, Down):
+    //   T1 is stacked (target). The group for T1 Down = the whole stack {T1,T2}
+    //   spanning rows 0..10. SplitHorizontal: first=5, second=5.
+    //   Down -> group_side top (stack shrinks to rows 0..5), T4 at rows 5..10.
+    //   T3 reabsorbs T4's old slot -> T3=(0,10,120,10).
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    // Build stacked T1+T2
+    tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::Stacked {
+            pane_id_to_stack_under: Some(zellij_utils::data::PaneId::Terminal(1)),
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 1));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 1, 120, 19));
+
+    // Add T3 below the stack (mirrors reference test)
+    tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 10, 120, 10));
+
+    // Split T3 vertically -> T3 left, T4 right
+    tab.vertical_split(PaneId::Terminal(4), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 10, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(4)), (60, 10, 60, 10));
+
+    // Move T4 (non-stacked) onto stacked target T1 (Down)
+    tab.move_pane_to_pane_id(PaneId::Terminal(4), PaneId::Terminal(1), Direction::Down)
+        .unwrap();
+
+    // T4 should land below the stacked group (y=5, rows=5)
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(4)), (0, 5, 120, 5));
+    // T3 reabsorbs T4's old slot
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 10, 120, 10));
+    // All four panes still exist
+    assert!(tab.tiled_panes.panes.contains_key(&PaneId::Terminal(1)));
+    assert!(tab.tiled_panes.panes.contains_key(&PaneId::Terminal(2)));
+    assert!(tab.tiled_panes.panes.contains_key(&PaneId::Terminal(3)));
+    assert!(tab.tiled_panes.panes.contains_key(&PaneId::Terminal(4)));
+}
+
+// ── Nice-to-have 13: focus is preserved after the move ────────────────────────
+#[test]
+fn move_pane_with_focused_source_preserves_focus() {
+    // T3 is active (focused). Move T3. After the move T3 should still be
+    // the pane returned by get_active_pane_id -- the move does not change focus.
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let client_id: ClientId = 1;
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, client_id, None, None)
+        .unwrap();
+    tab.horizontal_split(PaneId::Terminal(3), None, client_id, None, None)
+        .unwrap();
+    // T3 is the active pane after horizontal_split
+    assert_eq!(
+        tab.tiled_panes.get_active_pane_id(client_id),
+        Some(PaneId::Terminal(3))
+    );
+
+    tab.move_pane_to_pane_id(PaneId::Terminal(3), PaneId::Terminal(1), Direction::Right)
+        .unwrap();
+
+    // Focus should still be on T3 after the structural move
+    assert_eq!(
+        tab.tiled_panes.get_active_pane_id(client_id),
+        Some(PaneId::Terminal(3))
+    );
+}

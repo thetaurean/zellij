@@ -936,17 +936,138 @@ impl TiledPanes {
                     .collect()
             })
     }
+    /// Structurally re-parents `source` to land adjacent to `target` in the
+    /// given `direction`, reusing the same geometry rules as
+    /// `insert_pane_near_pane_id` (which is what `new-pane --target-pane`
+    /// uses):
+    ///   - Left/Right: source becomes a sibling of target's whole
+    ///     column-strip (every pane sharing target's `x`/`cols`). The strip
+    ///     slides aside; source spans the strip's combined height.
+    ///   - Up/Down: source lands inside target's slot only.
+    ///
+    /// Implementation (Path A, simplified): the existing
+    /// `fill_space_over_pane` already only mutates the grid's *internal*
+    /// `Rc<RefCell<HashMap>>` view (its `panes.borrow_mut().remove(&id)`
+    /// removes the pane's reference from that view but leaves the owned
+    /// `Box<dyn Pane>` in `TiledPanes::panes`, the outer `BTreeMap`).
+    /// After the grid is dropped we can still take ownership via
+    /// `self.panes.remove(&source)` and re-insert via
+    /// `insert_pane_near_pane_id`. No new helper needed.
+    pub fn move_pane_to_pane_id(
+        &mut self,
+        source: PaneId,
+        target: PaneId,
+        direction: Direction,
+    ) -> Result<(), String> {
+        if source == target {
+            return Err(
+                "source and target panes must be different".to_string(),
+            );
+        }
+        if !self.panes.contains_key(&source) {
+            return Err(format!(
+                "source pane {:?} not found in tiled layout",
+                source
+            ));
+        }
+        if !self.panes.contains_key(&target) {
+            return Err(format!(
+                "target pane {:?} not found in tiled layout",
+                target
+            ));
+        }
+        // Pre-check: the destination must have room. We compute this BEFORE
+        // touching the source's slot so we don't take the source out and
+        // then fail to put it back. Note that this is a stale snapshot
+        // relative to the post-extraction layout, but the source's slot
+        // being reclaimed only makes more room — it never removes room from
+        // a non-adjacent target.
+        if !self.can_insert_pane_near_pane_id(target, direction) {
+            return Err(
+                "not enough space to place source pane near target in requested direction"
+                    .to_string(),
+            );
+        }
+        // Conservative guard: defer stacked-source support to future work.
+        // Removing a pane from a stack via `fill_space_over_pane_in_stack`
+        // shifts stack neighbors in geometry-dependent ways; combining that
+        // with a structural re-parent hasn't been validated.
+        if let Some(pane) = self.panes.get(&source) {
+            if pane.current_geom().is_stacked() {
+                return Err(
+                    "moving a stacked pane is not yet supported".to_string(),
+                );
+            }
+        }
+        // Edge case: source already inside target's column-strip (Left/Right)
+        // or already in target's slot (Up/Down). Either the move is a no-op
+        // or the geometry collapses ambiguously. Bail out cleanly.
+        if let Some(group_ids) =
+            self.pane_ids_in_insert_group_near_pane_id(target, direction)
+        {
+            if group_ids.contains(&source) {
+                return Err(
+                    "source and target are already in the same group; move would be a no-op"
+                        .to_string(),
+                );
+            }
+        }
+        // Step 1: reclaim source's slot by growing neighbors. This drops
+        // the source's reference from the grid's internal view (so the
+        // resizer sees the correct picture) but leaves the owned
+        // `Box<dyn Pane>` in `self.panes` (the outer `BTreeMap`).
+        let filled = {
+            let mut pane_grid = TiledPaneGrid::new(
+                &mut self.panes,
+                &self.panes_to_hide,
+                *self.display_area.borrow(),
+                *self.viewport.borrow(),
+            );
+            pane_grid.fill_space_over_pane(source)
+        };
+        if !filled {
+            return Err(
+                "could not redistribute source pane's space to neighbors".to_string(),
+            );
+        }
+        // NOTE: unlike remove_pane (which calls self.set_pane_frames after fill_space_over_pane
+        // to immediately refresh neighbor borders), we don't call it here. insert_pane_near_pane_id's
+        // reapply_pane_frames at the end of step 3 covers all panes (neighbors + the moved source +
+        // the target group), and the screen instruction handler doesn't render until the whole
+        // operation returns. The intermediate state isn't observed.
+
+        // Step 2: take ownership of source from the outer map.
+        let Some(source_pane) = self.panes.remove(&source) else {
+            return Err(
+                "source pane vanished between validation and extraction".to_string(),
+            );
+        };
+        // Step 3: re-insert at the target location, reusing patch 1's helper.
+        if let Err(unused_source) = self.insert_pane_near_pane_id(target, source, source_pane, direction) {
+            // Defensive: pre-validation passed but the actual insert failed. Recover the pane
+            // by re-inserting into self.panes (with its old, now-overlapping geometry; user can
+            // still interact with it and move it manually).
+            self.panes.insert(source, unused_source);
+            log::error!(
+                "BUG: insert_pane_near_pane_id failed for source={:?} target={:?} direction={:?} \
+                 after can_insert returned true. Source pane restored to self.panes with stale geometry.",
+                source, target, direction
+            );
+            return Err("layout state changed between validation and insertion; source pane restored with stale geometry".to_string());
+        }
+        Ok(())
+    }
     pub fn insert_pane_near_pane_id(
         &mut self,
         target_pane_id: PaneId,
         pane_id: PaneId,
         mut new_pane: Box<dyn Pane>,
         direction: Direction,
-    ) -> bool {
+    ) -> Result<(), Box<dyn Pane>> {
         let Some((grouped_pane_ids_and_geoms, group_side_geom, new_pane_geom, split_direction)) =
             self.pane_group_split_near_pane_id(target_pane_id, direction)
         else {
-            return false;
+            return Err(new_pane);
         };
 
         let mut resized_stack_ids = HashSet::new();
@@ -989,7 +1110,7 @@ impl TiledPanes {
             SplitDirection::Horizontal => self.relayout(SplitDirection::Vertical),
         }
         self.reapply_pane_frames();
-        true
+        Ok(())
     }
     pub fn focus_pane_for_all_clients(&mut self, pane_id: PaneId) {
         let connected_clients: Vec<ClientId> =

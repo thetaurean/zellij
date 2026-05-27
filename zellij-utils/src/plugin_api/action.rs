@@ -1118,6 +1118,7 @@ impl TryFrom<Action> for ProtobufAction {
             | Action::HalfPageScrollDownByPaneId { .. }
             | Action::ResizeByPaneId { .. }
             | Action::MovePaneByPaneId { .. }
+            | Action::MovePaneToPaneId { .. }
             | Action::MovePaneBackwardsByPaneId { .. }
             | Action::ClearScreenByPaneId { .. }
             | Action::EditScrollbackByPaneId { .. }

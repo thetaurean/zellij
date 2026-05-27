@@ -1313,6 +1313,14 @@ impl<'a> TiledPaneGrid<'a> {
     pub fn fill_space_over_pane(&mut self, id: PaneId) -> bool {
         // true => successfully filled space over pane
         // false => didn't succeed, so didn't do anything
+        //
+        // Note: `self.panes` here is the *grid's* internal `Rc<RefCell<...>>`
+        // view of `&mut Box<dyn Pane>` references borrowed from `TiledPanes`.
+        // Removing an entry from this map drops the reference but leaves the
+        // underlying `Box<dyn Pane>` in `TiledPanes::panes` (the outer
+        // `BTreeMap`). Callers can therefore take ownership of the pane
+        // *after* this call returns by removing it from the outer map (this
+        // is what `TiledPanes::remove_pane` and the structural-move path do).
         let (freed_width, freed_height, pane_to_close_is_stacked) = {
             let panes = self.panes.borrow_mut();
             let Some(pane_to_close) = panes.get(&id) else {

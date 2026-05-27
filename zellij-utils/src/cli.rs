@@ -781,6 +781,10 @@ pub enum CliAction {
         /// Target a specific pane by ID (eg. terminal_1, plugin_2, or 3)
         #[clap(short, long, value_parser)]
         pane_id: Option<String>,
+        /// When set with a direction (right|left|up|down), structurally re-parent --pane-id (the source)
+        /// so it lands adjacent to <to-pane-id> in the requested direction.
+        #[clap(long, value_parser, requires("direction"), requires("pane-id"))]
+        to_pane_id: Option<String>,
     },
     /// Rotate the location of the previous pane backwards
     MovePaneBackwards {
@@ -1750,5 +1754,37 @@ mod tests {
     fn subscribe_requires_pane_id() {
         let result = CliArgs::try_parse_from(["zellij", "subscribe"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn move_pane_to_pane_id_requires_direction_and_pane_id() {
+        // --to-pane-id alone (no direction, no --pane-id) must be rejected by clap
+        let result = CliArgs::try_parse_from(["zellij", "action", "move-pane", "--to-pane-id", "terminal_3"]);
+        assert!(result.is_err(), "expected clap error when --pane-id and direction are absent");
+
+        // --to-pane-id with --pane-id but still no positional direction must be rejected
+        let result = CliArgs::try_parse_from([
+            "zellij", "action", "move-pane", "--to-pane-id", "terminal_3", "--pane-id", "terminal_1",
+        ]);
+        assert!(result.is_err(), "expected clap error when direction is absent");
+
+        // full valid form: direction + --pane-id + --to-pane-id must be accepted
+        let result = CliArgs::try_parse_from([
+            "zellij", "action", "move-pane", "Right", "--pane-id", "terminal_1", "--to-pane-id", "terminal_3",
+        ]);
+        assert!(result.is_ok(), "expected Ok for valid move-pane with all required args");
+        if let Ok(cli) = result {
+            if let Some(Command::Action(boxed)) = cli.command {
+                if let CliAction::MovePane { direction, pane_id, to_pane_id } = *boxed {
+                    assert!(matches!(direction, Some(Direction::Right)));
+                    assert_eq!(pane_id.as_deref(), Some("terminal_1"));
+                    assert_eq!(to_pane_id.as_deref(), Some("terminal_3"));
+                } else {
+                    panic!("expected MovePane action");
+                }
+            } else {
+                panic!("expected Action command");
+            }
+        }
     }
 }

@@ -2562,6 +2562,7 @@ pub fn send_cli_move_pane_action() {
     let cli_action = CliAction::MovePane {
         direction: Some(Direction::Right),
         pane_id: None,
+        to_pane_id: None,
     };
     send_cli_action_to_server(&session_metadata, cli_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -6631,6 +6632,7 @@ pub fn send_cli_move_pane_with_pane_id() {
     let cli_action = CliAction::MovePane {
         direction: Some(Direction::Right),
         pane_id: Some("terminal_0".to_string()),
+        to_pane_id: None,
     };
     send_cli_action_to_server(&session_metadata, cli_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));

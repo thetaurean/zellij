@@ -594,6 +594,11 @@ pub enum Action {
         pane_id: PaneId,
         direction: Option<Direction>,
     },
+    MovePaneToPaneId {
+        pane_id: PaneId,
+        to_pane_id: PaneId,
+        direction: Direction,
+    },
     MovePaneBackwardsByPaneId {
         pane_id: PaneId,
     },
@@ -830,15 +835,29 @@ impl Action {
             CliAction::MoveFocusOrTab { direction } => {
                 Ok(vec![Action::MoveFocusOrTab { direction }])
             },
-            CliAction::MovePane { direction, pane_id } => match pane_id {
-                Some(pane_id_str) => {
+            CliAction::MovePane { direction, pane_id, to_pane_id } => match (pane_id, to_pane_id) {
+                (Some(pane_id_str), Some(to_pane_id_str)) => {
+                    // Structural re-parent: move source pane to land adjacent to target pane.
+                    // clap enforces that --direction is also present when --to-pane-id is given.
+                    let pane_id = PaneId::from_str(&pane_id_str)
+                        .map_err(|_| format!(
+                            "Malformed pane id: {pane_id_str}, expecting either a bare integer (eg. 1), a terminal pane id (eg. terminal_1) or a plugin pane id (eg. plugin_1)"
+                        ))?;
+                    let to_pane_id = PaneId::from_str(&to_pane_id_str)
+                        .map_err(|_| format!(
+                            "Malformed pane id: {to_pane_id_str}, expecting either a bare integer (eg. 1), a terminal pane id (eg. terminal_1) or a plugin pane id (eg. plugin_1)"
+                        ))?;
+                    let direction = direction.ok_or_else(|| "--to-pane-id requires a direction positional argument (right|left|up|down)".to_string())?;
+                    Ok(vec![Action::MovePaneToPaneId { pane_id, to_pane_id, direction }])
+                },
+                (Some(pane_id_str), None) => {
                     let pane_id = PaneId::from_str(&pane_id_str)
                         .map_err(|_| format!(
                             "Malformed pane id: {pane_id_str}, expecting either a bare integer (eg. 1), a terminal pane id (eg. terminal_1) or a plugin pane id (eg. plugin_1)"
                         ))?;
                     Ok(vec![Action::MovePaneByPaneId { pane_id, direction }])
                 },
-                None => Ok(vec![Action::MovePane { direction }]),
+                (None, _) => Ok(vec![Action::MovePane { direction }]),
             },
             CliAction::MovePaneBackwards { pane_id } => match pane_id {
                 Some(pane_id_str) => {
@@ -2707,6 +2726,7 @@ mod tests {
         let cli_action = CliAction::MovePane {
             direction: Some(Direction::Right),
             pane_id: Some("terminal_9".to_string()),
+            to_pane_id: None,
         };
         let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
         assert!(result.is_ok());
@@ -2726,6 +2746,7 @@ mod tests {
         let cli_action = CliAction::MovePane {
             direction: Some(Direction::Right),
             pane_id: None,
+            to_pane_id: None,
         };
         let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
         assert!(result.is_ok());
@@ -2737,6 +2758,75 @@ mod tests {
             },
             _ => panic!("Expected MovePane action"),
         }
+    }
+
+    #[test]
+    fn test_move_pane_to_pane_id_with_numeric_id() {
+        // --pane-id terminal_5 --to-pane-id terminal_7 --direction Right
+        let cli_action = CliAction::MovePane {
+            direction: Some(Direction::Right),
+            pane_id: Some("terminal_5".to_string()),
+            to_pane_id: Some("terminal_7".to_string()),
+        };
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert!(result.is_ok());
+        let actions = result.unwrap();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            Action::MovePaneToPaneId {
+                pane_id,
+                to_pane_id,
+                direction,
+            } => {
+                assert!(matches!(pane_id, PaneId::Terminal(5)));
+                assert!(matches!(to_pane_id, PaneId::Terminal(7)));
+                assert!(matches!(direction, Direction::Right));
+            },
+            _ => panic!("Expected MovePaneToPaneId action"),
+        }
+    }
+
+    #[test]
+    fn test_move_pane_to_pane_id_source_as_bare_int() {
+        // bare integer form: --pane-id 3 --to-pane-id 9 --direction Down
+        let cli_action = CliAction::MovePane {
+            direction: Some(Direction::Down),
+            pane_id: Some("3".to_string()),
+            to_pane_id: Some("9".to_string()),
+        };
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert!(result.is_ok());
+        let actions = result.unwrap();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            Action::MovePaneToPaneId {
+                pane_id,
+                to_pane_id,
+                direction,
+            } => {
+                assert!(matches!(pane_id, PaneId::Terminal(3)));
+                assert!(matches!(to_pane_id, PaneId::Terminal(9)));
+                assert!(matches!(direction, Direction::Down));
+            },
+            _ => panic!("Expected MovePaneToPaneId action"),
+        }
+    }
+
+    #[test]
+    fn test_move_pane_to_pane_id_rejects_malformed() {
+        // malformed to-pane-id value should produce an Err
+        let cli_action = CliAction::MovePane {
+            direction: Some(Direction::Right),
+            pane_id: Some("terminal_1".to_string()),
+            to_pane_id: Some("not_a_pane_id".to_string()),
+        };
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Malformed pane id: not_a_pane_id"),
+            "expected error to contain 'Malformed pane id: not_a_pane_id', got: {err}"
+        );
     }
 
     // 11. MovePaneBackwards

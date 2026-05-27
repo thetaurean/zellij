@@ -892,6 +892,7 @@ impl From<crate::input::actions::Action>
             MovePaneBackwardsAction,
             MovePaneBackwardsByPaneIdAction,
             MovePaneByPaneIdAction,
+            MovePaneToPaneIdAction,
             MoveTabAction,
             MoveTabByTabIdAction,
             NewBlockingPaneAction,
@@ -1759,6 +1760,15 @@ impl From<crate::input::actions::Action>
                     direction: direction.map(|d| direction_to_proto_i32(d)),
                 })
             },
+            crate::input::actions::Action::MovePaneToPaneId {
+                pane_id,
+                to_pane_id,
+                direction,
+            } => ActionType::MovePaneToPaneId(MovePaneToPaneIdAction {
+                pane_id: Some(pane_id.into()),
+                to_pane_id: Some(to_pane_id.into()),
+                direction: direction_to_proto_i32(direction),
+            }),
             crate::input::actions::Action::MovePaneBackwardsByPaneId { pane_id } => {
                 ActionType::MovePaneBackwardsByPaneId(MovePaneBackwardsByPaneIdAction {
                     pane_id: Some(pane_id.into()),
@@ -2673,6 +2683,20 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                     pane_id: a
                         .pane_id
                         .ok_or_else(|| anyhow!("MovePaneByPaneId missing pane_id"))?
+                        .try_into()?,
+                    direction,
+                })
+            },
+            ActionType::MovePaneToPaneId(a) => {
+                let direction = proto_i32_to_direction(a.direction)?;
+                Ok(crate::input::actions::Action::MovePaneToPaneId {
+                    pane_id: a
+                        .pane_id
+                        .ok_or_else(|| anyhow!("MovePaneToPaneId missing pane_id"))?
+                        .try_into()?,
+                    to_pane_id: a
+                        .to_pane_id
+                        .ok_or_else(|| anyhow!("MovePaneToPaneId missing to_pane_id"))?
                         .try_into()?,
                     direction,
                 })

@@ -1977,26 +1977,30 @@ impl Tab {
             self.tiled_panes.unset_fullscreen();
         }
         new_pane.set_active_at(Instant::now());
-        if self
+        match self
             .tiled_panes
             .insert_pane_near_pane_id(target_pane_id, pid, new_pane, direction)
         {
-            self.set_should_clear_display_before_rendering();
-            if should_focus_pane {
-                if let Some(client_id) = client_id {
-                    self.tiled_panes.focus_pane(pid, client_id);
+            Ok(()) => {
+                self.set_should_clear_display_before_rendering();
+                if should_focus_pane {
+                    if let Some(client_id) = client_id {
+                        self.tiled_panes.focus_pane(pid, client_id);
+                    }
                 }
-            }
-            self.swap_layouts.set_is_tiled_damaged();
-        } else {
-            log::error!(
-                "Could not insert pane {:?} near target pane {:?}",
-                pid,
-                target_pane_id
-            );
-            self.senders
-                .send_to_pty(PtyInstruction::ClosePane(pid, None))
-                .with_context(err_context)?;
+                self.swap_layouts.set_is_tiled_damaged();
+            },
+            Err(_unused_pane) => {
+                // _unused_pane dropped here — the Box closing the PTY handle is intentional.
+                log::error!(
+                    "Could not insert pane {:?} near target pane {:?}",
+                    pid,
+                    target_pane_id
+                );
+                self.senders
+                    .send_to_pty(PtyInstruction::ClosePane(pid, None))
+                    .with_context(err_context)?;
+            },
         }
         Ok(())
     }
@@ -6455,6 +6459,48 @@ impl Tab {
         } else {
             self.tiled_panes.move_pane(search_backwards, pane_id);
         }
+    }
+    /// Structural re-parent: move `source` to land adjacent to `target` in
+    /// `direction`. Both panes must be tiled (floating panes are rejected
+    /// at this layer). Delegates the geometry work to
+    /// `TiledPanes::move_pane_to_pane_id`.
+    pub fn move_pane_to_pane_id(
+        &mut self,
+        source: PaneId,
+        target: PaneId,
+        direction: Direction,
+    ) -> Result<(), String> {
+        if self.floating_panes.panes_contain(&source) {
+            return Err(
+                "--to-pane-id requires a tiled source pane (floating panes not supported)"
+                    .to_string(),
+            );
+        }
+        if self.floating_panes.panes_contain(&target) {
+            return Err(
+                "--to-pane-id requires a tiled target pane (floating panes not supported)"
+                    .to_string(),
+            );
+        }
+        // Conservative: refuse the move when fullscreen is active, rather than implicitly
+        // exit fullscreen (which is what `new_pane` does in its analogous spot). A move
+        // is initiated by an external command, not a user keystroke, so silently mutating
+        // the fullscreen state is more surprising than asking the user to exit fullscreen
+        // explicitly. If we ever add a `--force` flag we'd auto-unset here.
+        if self.tiled_panes.fullscreen_is_active() {
+            return Err(
+                "cannot move pane while fullscreen is active".to_string(),
+            );
+        }
+        self.tiled_panes
+            .move_pane_to_pane_id(source, target, direction)?;
+        // Mirror the state-sync pattern used by `new_pane` after a successful
+        // `insert_pane_near_pane_id` (line ~1984): clear pre-render, mark the
+        // tiled layout damaged so any auto-layouts can re-evaluate.
+        self.set_should_clear_display_before_rendering();
+        self.swap_layouts.set_is_tiled_damaged();
+        self.set_force_render();
+        Ok(())
     }
     pub fn clear_screen_by_pane_id(&mut self, pane_id: PaneId) -> Result<()> {
         self.clear_screen_for_pane_id(pane_id);

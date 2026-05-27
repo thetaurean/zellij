@@ -442,6 +442,7 @@ pub enum ScreenContext {
     HalfPageScrollDownWithPaneId,
     ResizeWithPaneId,
     MovePaneWithPaneIdCli,
+    MovePaneToPaneIdCli,
     MovePaneBackwardsWithPaneId,
     ClearScreenWithPaneId,
     EditScrollbackWithPaneId,

@@ -3439,6 +3439,36 @@ fn test_client_messages() {
         is_cli_client: true,
     });
     test_client_roundtrip!(ClientToServerMsg::Action {
+        action: Action::MovePaneToPaneId {
+            pane_id: PaneId::Terminal(5),
+            to_pane_id: PaneId::Terminal(7),
+            direction: Direction::Right,
+        },
+        terminal_id: Some(1),
+        client_id: Some(100),
+        is_cli_client: true,
+    });
+    test_client_roundtrip!(ClientToServerMsg::Action {
+        action: Action::MovePaneToPaneId {
+            pane_id: PaneId::Terminal(2),
+            to_pane_id: PaneId::Plugin(3),
+            direction: Direction::Down,
+        },
+        terminal_id: Some(1),
+        client_id: Some(100),
+        is_cli_client: true,
+    });
+    test_client_roundtrip!(ClientToServerMsg::Action {
+        action: Action::MovePaneToPaneId {
+            pane_id: PaneId::Plugin(1),
+            to_pane_id: PaneId::Plugin(4),
+            direction: Direction::Up,
+        },
+        terminal_id: Some(1),
+        client_id: Some(100),
+        is_cli_client: true,
+    });
+    test_client_roundtrip!(ClientToServerMsg::Action {
         action: Action::MovePaneBackwardsByPaneId {
             pane_id: PaneId::Terminal(1),
         },

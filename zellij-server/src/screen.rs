@@ -873,6 +873,7 @@ pub enum ScreenInstruction {
     HalfPageScrollDownWithPaneId(PaneId, Option<NotificationEnd>),
     ResizeWithPaneId(PaneId, ResizeStrategy, Option<NotificationEnd>),
     MovePaneWithPaneIdCli(PaneId, Option<Direction>, Option<NotificationEnd>),
+    MovePaneToPaneIdCli(PaneId, PaneId, Direction, Option<NotificationEnd>),
     MovePaneBackwardsWithPaneId(PaneId, Option<NotificationEnd>),
     ClearScreenWithPaneId(PaneId, Option<NotificationEnd>),
     EditScrollbackWithPaneId(PaneId, bool, Option<NotificationEnd>),
@@ -1209,6 +1210,7 @@ impl From<&ScreenInstruction> for ScreenContext {
             },
             ScreenInstruction::ResizeWithPaneId(..) => ScreenContext::ResizeWithPaneId,
             ScreenInstruction::MovePaneWithPaneIdCli(..) => ScreenContext::MovePaneWithPaneIdCli,
+            ScreenInstruction::MovePaneToPaneIdCli(..) => ScreenContext::MovePaneToPaneIdCli,
             ScreenInstruction::MovePaneBackwardsWithPaneId(..) => {
                 ScreenContext::MovePaneBackwardsWithPaneId
             },
@@ -9713,6 +9715,51 @@ pub(crate) fn screen_thread_main(
                     if let Some(ref mut c) = _completion_tx {
                         c.set_exit_status(1);
                         c.set_error_message(format!("Pane with id {:?} not found", pane_id));
+                    }
+                }
+                screen.render(None)?;
+                screen.log_and_report_session_state()?;
+            },
+            ScreenInstruction::MovePaneToPaneIdCli(
+                source_pane_id,
+                target_pane_id,
+                direction,
+                mut completion_tx,
+            ) => {
+                // Locate the tab that owns the source pane (mirrors the
+                // lookup pattern in `MovePaneWithPaneIdCli` above).
+                let all_tabs = screen.get_tabs_mut();
+                let mut found_tab = false;
+                let mut result: Result<(), String> = Ok(());
+                for tab in all_tabs.values_mut() {
+                    if tab.has_pane_with_pid(&source_pane_id) {
+                        found_tab = true;
+                        if !tab.has_pane_with_pid(&target_pane_id) {
+                            result = Err(format!(
+                                "target pane {:?} not found in the same tab as source pane {:?}",
+                                target_pane_id, source_pane_id
+                            ));
+                        } else {
+                            result = tab.move_pane_to_pane_id(
+                                source_pane_id,
+                                target_pane_id,
+                                direction,
+                            );
+                        }
+                        break;
+                    }
+                }
+                if !found_tab {
+                    result = Err(format!(
+                        "source pane {:?} not found",
+                        source_pane_id
+                    ));
+                }
+                if let Err(message) = result {
+                    log::warn!("move-pane --to-pane-id failed: {}", message);
+                    if let Some(ref mut c) = completion_tx {
+                        c.set_exit_status(1);
+                        c.set_error_message(message);
                     }
                 }
                 screen.render(None)?;

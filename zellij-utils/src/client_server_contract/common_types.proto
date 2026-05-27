@@ -277,6 +277,7 @@ message Action {
     SetDarkThemeAction set_dark_theme = 137;
     SetLightThemeAction set_light_theme = 138;
     ToggleThemeAction toggle_theme = 139;
+    MovePaneToPaneIdAction move_pane_to_pane_id = 140;
   }
 }
 
@@ -1220,6 +1221,7 @@ message HalfPageScrollUpByPaneIdAction { PaneId pane_id = 1; }
 message HalfPageScrollDownByPaneIdAction { PaneId pane_id = 1; }
 message ResizeByPaneIdAction { PaneId pane_id = 1; ResizeAction resize_action = 2; }
 message MovePaneByPaneIdAction { PaneId pane_id = 1; optional Direction direction = 2; }
+message MovePaneToPaneIdAction { PaneId pane_id = 1; PaneId to_pane_id = 2; Direction direction = 3; }
 message MovePaneBackwardsByPaneIdAction { PaneId pane_id = 1; }
 message ClearScreenByPaneIdAction { PaneId pane_id = 1; }
 message EditScrollbackByPaneIdAction {

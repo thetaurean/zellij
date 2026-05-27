@@ -1923,6 +1923,20 @@ pub(crate) fn route_action(
                 ))
                 .with_context(err_context)?;
         },
+        Action::MovePaneToPaneId {
+            pane_id,
+            to_pane_id,
+            direction,
+        } => {
+            senders
+                .send_to_screen(ScreenInstruction::MovePaneToPaneIdCli(
+                    pane_id.into(),
+                    to_pane_id.into(),
+                    direction,
+                    Some(NotificationEnd::new(completion_tx)),
+                ))
+                .with_context(err_context)?;
+        },
         Action::MovePaneBackwardsByPaneId { pane_id } => {
             senders
                 .send_to_screen(ScreenInstruction::MovePaneBackwardsWithPaneId(
