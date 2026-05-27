@@ -1291,6 +1291,40 @@ impl<'a> TiledPaneGrid<'a> {
 
         None
     }
+    fn find_panes_to_grow_absorbing_to(
+        &self,
+        id: PaneId,
+        absorb_to: PaneId,
+    ) -> Option<(Vec<PaneId>, SplitDirection)> {
+        let candidate_groups = [
+            (
+                self.panes_to_the_left_between_aligning_borders(id),
+                SplitDirection::Horizontal,
+            ),
+            (
+                self.panes_to_the_right_between_aligning_borders(id),
+                SplitDirection::Horizontal,
+            ),
+            (
+                self.panes_above_between_aligning_borders(id),
+                SplitDirection::Vertical,
+            ),
+            (
+                self.panes_below_between_aligning_borders(id),
+                SplitDirection::Vertical,
+            ),
+        ];
+
+        candidate_groups.into_iter().find_map(|(panes, direction)| {
+            panes.and_then(|panes| {
+                if panes.as_slice() == [absorb_to] {
+                    Some((panes, direction))
+                } else {
+                    None
+                }
+            })
+        })
+    }
     fn grow_panes(
         &mut self,
         panes: &[PaneId],
@@ -1362,6 +1396,55 @@ impl<'a> TiledPaneGrid<'a> {
             return true;
         }
         false
+    }
+    pub fn fill_space_over_pane_absorbing_to(
+        &mut self,
+        id: PaneId,
+        absorb_to: PaneId,
+    ) -> Result<(), String> {
+        if id == absorb_to {
+            return Err("closed pane and absorber pane must be different".to_string());
+        }
+        let (freed_width, freed_height, pane_to_close_is_stacked) = {
+            let panes = self.panes.borrow_mut();
+            let Some(pane_to_close) = panes.get(&id) else {
+                return Err(format!("pane {:?} not found in tiled layout", id));
+            };
+            if !panes.contains_key(&absorb_to) {
+                return Err(format!(
+                    "absorber pane {:?} not found in tiled layout",
+                    absorb_to
+                ));
+            }
+            let freed_space = pane_to_close.position_and_size();
+            let freed_width = freed_space.cols.as_percent();
+            let freed_height = freed_space.rows.as_percent();
+            let pane_to_close_is_stacked = pane_to_close.current_geom().is_stacked();
+            (freed_width, freed_height, pane_to_close_is_stacked)
+        };
+        if pane_to_close_is_stacked {
+            return Err("close-pane --absorb-to does not support stacked panes".to_string());
+        }
+        let (Some(freed_width), Some(freed_height)) = (freed_width, freed_height) else {
+            return Err("close-pane --absorb-to does not support fixed-size panes".to_string());
+        };
+        let Some((panes_to_grow, direction)) = self.find_panes_to_grow_absorbing_to(id, absorb_to)
+        else {
+            return Err(format!(
+                "absorber pane {:?} is not the complete adjacent aligning target for pane {:?}",
+                absorb_to, id
+            ));
+        };
+
+        self.grow_panes(&panes_to_grow, direction, (freed_width, freed_height));
+        let side_length = match direction {
+            SplitDirection::Vertical => self.display_area.rows,
+            SplitDirection::Horizontal => self.display_area.cols,
+        };
+        self.panes.borrow_mut().remove(&id);
+        let mut pane_resizer = PaneResizer::new(self.panes.clone());
+        let _ = pane_resizer.layout(direction, side_length);
+        Ok(())
     }
     pub fn find_room_for_new_pane(
         &self,

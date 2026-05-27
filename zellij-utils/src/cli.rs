@@ -1176,6 +1176,11 @@ pub enum CliAction {
         /// Target a specific pane by ID (eg. terminal_1, plugin_2, or 3)
         #[clap(short, long, value_parser)]
         pane_id: Option<String>,
+        /// Direct the closed pane's freed space to a specific adjacent pane (by ID).
+        /// The absorber must be the sole pane along the closed pane's aligning border
+        /// (no co-aligned neighbors); otherwise the call errors without closing.
+        #[clap(long, value_parser)]
+        absorb_to: Option<String>,
     },
     /// Renames the focused pane
     RenamePane {
@@ -1759,28 +1764,111 @@ mod tests {
     #[test]
     fn move_pane_to_pane_id_requires_direction_and_pane_id() {
         // --to-pane-id alone (no direction, no --pane-id) must be rejected by clap
-        let result = CliArgs::try_parse_from(["zellij", "action", "move-pane", "--to-pane-id", "terminal_3"]);
-        assert!(result.is_err(), "expected clap error when --pane-id and direction are absent");
+        let result = CliArgs::try_parse_from([
+            "zellij",
+            "action",
+            "move-pane",
+            "--to-pane-id",
+            "terminal_3",
+        ]);
+        assert!(
+            result.is_err(),
+            "expected clap error when --pane-id and direction are absent"
+        );
 
         // --to-pane-id with --pane-id but still no positional direction must be rejected
         let result = CliArgs::try_parse_from([
-            "zellij", "action", "move-pane", "--to-pane-id", "terminal_3", "--pane-id", "terminal_1",
+            "zellij",
+            "action",
+            "move-pane",
+            "--to-pane-id",
+            "terminal_3",
+            "--pane-id",
+            "terminal_1",
         ]);
-        assert!(result.is_err(), "expected clap error when direction is absent");
+        assert!(
+            result.is_err(),
+            "expected clap error when direction is absent"
+        );
 
         // full valid form: direction + --pane-id + --to-pane-id must be accepted
         let result = CliArgs::try_parse_from([
-            "zellij", "action", "move-pane", "Right", "--pane-id", "terminal_1", "--to-pane-id", "terminal_3",
+            "zellij",
+            "action",
+            "move-pane",
+            "Right",
+            "--pane-id",
+            "terminal_1",
+            "--to-pane-id",
+            "terminal_3",
         ]);
-        assert!(result.is_ok(), "expected Ok for valid move-pane with all required args");
+        assert!(
+            result.is_ok(),
+            "expected Ok for valid move-pane with all required args"
+        );
         if let Ok(cli) = result {
             if let Some(Command::Action(boxed)) = cli.command {
-                if let CliAction::MovePane { direction, pane_id, to_pane_id } = *boxed {
+                if let CliAction::MovePane {
+                    direction,
+                    pane_id,
+                    to_pane_id,
+                } = *boxed
+                {
                     assert!(matches!(direction, Some(Direction::Right)));
                     assert_eq!(pane_id.as_deref(), Some("terminal_1"));
                     assert_eq!(to_pane_id.as_deref(), Some("terminal_3"));
                 } else {
                     panic!("expected MovePane action");
+                }
+            } else {
+                panic!("expected Action command");
+            }
+        }
+    }
+
+    #[test]
+    fn close_pane_accepts_absorb_to_with_optional_pane_id() {
+        let result = CliArgs::try_parse_from([
+            "zellij",
+            "action",
+            "close-pane",
+            "--absorb-to",
+            "terminal_3",
+        ]);
+        assert!(result.is_ok(), "expected Ok for close-pane --absorb-to");
+        if let Ok(cli) = result {
+            if let Some(Command::Action(boxed)) = cli.command {
+                if let CliAction::ClosePane { pane_id, absorb_to } = *boxed {
+                    assert_eq!(pane_id.as_deref(), None);
+                    assert_eq!(absorb_to.as_deref(), Some("terminal_3"));
+                } else {
+                    panic!("expected ClosePane action");
+                }
+            } else {
+                panic!("expected Action command");
+            }
+        }
+
+        let result = CliArgs::try_parse_from([
+            "zellij",
+            "action",
+            "close-pane",
+            "--pane-id",
+            "terminal_1",
+            "--absorb-to",
+            "terminal_3",
+        ]);
+        assert!(
+            result.is_ok(),
+            "expected Ok for close-pane --pane-id --absorb-to"
+        );
+        if let Ok(cli) = result {
+            if let Some(Command::Action(boxed)) = cli.command {
+                if let CliAction::ClosePane { pane_id, absorb_to } = *boxed {
+                    assert_eq!(pane_id.as_deref(), Some("terminal_1"));
+                    assert_eq!(absorb_to.as_deref(), Some("terminal_3"));
+                } else {
+                    panic!("expected ClosePane action");
                 }
             } else {
                 panic!("expected Action command");

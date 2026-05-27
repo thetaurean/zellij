@@ -300,6 +300,12 @@ pub enum Action {
     },
     /// Close the focus pane.
     CloseFocus,
+    /// Close the focused pane, directing its freed space to `absorb_to`.
+    /// `absorb_to` is an unresolved pane identifier (name|id) — the server
+    /// resolves it against the tab containing the focused pane.
+    CloseFocusAbsorbingTo {
+        absorb_to: String,
+    },
     PaneNameInput {
         input: Vec<u8>,
     },
@@ -618,6 +624,13 @@ pub enum Action {
     CloseFocusByPaneId {
         pane_id: PaneId,
     },
+    /// Close the specified pane, directing its freed space to `absorb_to`.
+    /// `absorb_to` is an unresolved pane identifier (name|id) — the server
+    /// resolves it against the tab that contains `pane_id`.
+    CloseFocusByPaneIdAbsorbingTo {
+        pane_id: PaneId,
+        absorb_to: String,
+    },
     RenamePaneByPaneId {
         pane_id: Option<PaneId>,
         name: Vec<u8>,
@@ -835,7 +848,11 @@ impl Action {
             CliAction::MoveFocusOrTab { direction } => {
                 Ok(vec![Action::MoveFocusOrTab { direction }])
             },
-            CliAction::MovePane { direction, pane_id, to_pane_id } => match (pane_id, to_pane_id) {
+            CliAction::MovePane {
+                direction,
+                pane_id,
+                to_pane_id,
+            } => match (pane_id, to_pane_id) {
                 (Some(pane_id_str), Some(to_pane_id_str)) => {
                     // Structural re-parent: move source pane to land adjacent to target pane.
                     // clap enforces that --direction is also present when --to-pane-id is given.
@@ -848,7 +865,11 @@ impl Action {
                             "Malformed pane id: {to_pane_id_str}, expecting either a bare integer (eg. 1), a terminal pane id (eg. terminal_1) or a plugin pane id (eg. plugin_1)"
                         ))?;
                     let direction = direction.ok_or_else(|| "--to-pane-id requires a direction positional argument (right|left|up|down)".to_string())?;
-                    Ok(vec![Action::MovePaneToPaneId { pane_id, to_pane_id, direction }])
+                    Ok(vec![Action::MovePaneToPaneId {
+                        pane_id,
+                        to_pane_id,
+                        direction,
+                    }])
                 },
                 (Some(pane_id_str), None) => {
                     let pane_id = PaneId::from_str(&pane_id_str)
@@ -1337,15 +1358,33 @@ impl Action {
             CliAction::AreFloatingPanesVisible { tab_id } => {
                 Ok(vec![Action::AreFloatingPanesVisible { tab_id }])
             },
-            CliAction::ClosePane { pane_id } => match pane_id {
-                Some(pane_id_str) => {
-                    let pane_id = PaneId::from_str(&pane_id_str)
+            CliAction::ClosePane { pane_id, absorb_to } => {
+                let parse_pane_id = |pane_id_str: String| {
+                    PaneId::from_str(&pane_id_str)
                         .map_err(|_| format!(
                             "Malformed pane id: {pane_id_str}, expecting either a bare integer (eg. 1), a terminal pane id (eg. terminal_1) or a plugin pane id (eg. plugin_1)"
-                        ))?;
-                    Ok(vec![Action::CloseFocusByPaneId { pane_id }])
-                },
-                None => Ok(vec![Action::CloseFocus]),
+                        ))
+                };
+                // Note: `absorb_to` stays as a raw String (name|id) — the
+                // server resolves it against the tab that contains the
+                // closing pane, mirroring Patch 1's `--target-pane <name|id>`.
+                match (pane_id, absorb_to) {
+                    (Some(pane_id_str), Some(absorb_to)) => {
+                        let pane_id = parse_pane_id(pane_id_str)?;
+                        Ok(vec![Action::CloseFocusByPaneIdAbsorbingTo {
+                            pane_id,
+                            absorb_to,
+                        }])
+                    },
+                    (Some(pane_id_str), None) => {
+                        let pane_id = parse_pane_id(pane_id_str)?;
+                        Ok(vec![Action::CloseFocusByPaneId { pane_id }])
+                    },
+                    (None, Some(absorb_to)) => {
+                        Ok(vec![Action::CloseFocusAbsorbingTo { absorb_to }])
+                    },
+                    (None, None) => Ok(vec![Action::CloseFocus]),
+                }
             },
             CliAction::RenamePane { name, pane_id } => {
                 let pane_id = match pane_id {
@@ -2979,6 +3018,7 @@ mod tests {
     fn test_close_pane_with_pane_id() {
         let cli_action = CliAction::ClosePane {
             pane_id: Some("terminal_18".to_string()),
+            absorb_to: None,
         };
         let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
         assert!(result.is_ok());
@@ -2994,12 +3034,73 @@ mod tests {
 
     #[test]
     fn test_close_pane_without_pane_id() {
-        let cli_action = CliAction::ClosePane { pane_id: None };
+        let cli_action = CliAction::ClosePane {
+            pane_id: None,
+            absorb_to: None,
+        };
         let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
         assert!(result.is_ok());
         let actions = result.unwrap();
         assert_eq!(actions.len(), 1);
         assert!(matches!(actions[0], Action::CloseFocus));
+    }
+
+    #[test]
+    fn test_close_pane_with_absorb_to() {
+        let cli_action = CliAction::ClosePane {
+            pane_id: None,
+            absorb_to: Some("terminal_19".to_string()),
+        };
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert!(result.is_ok());
+        let actions = result.unwrap();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            Action::CloseFocusAbsorbingTo { absorb_to } => {
+                assert_eq!(absorb_to, "terminal_19");
+            },
+            _ => panic!("Expected CloseFocusAbsorbingTo action"),
+        }
+    }
+
+    #[test]
+    fn test_close_pane_with_absorb_to_pane_name() {
+        // Absorb-to accepts a pane name (e.g. "editor") in addition to an
+        // id form — the server resolves it against the live pane state.
+        // Mirrors Patch 1's `--target-pane <name|id>`.
+        let cli_action = CliAction::ClosePane {
+            pane_id: None,
+            absorb_to: Some("editor".to_string()),
+        };
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert!(result.is_ok());
+        let actions = result.unwrap();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            Action::CloseFocusAbsorbingTo { absorb_to } => {
+                assert_eq!(absorb_to, "editor");
+            },
+            _ => panic!("Expected CloseFocusAbsorbingTo action"),
+        }
+    }
+
+    #[test]
+    fn test_close_pane_with_pane_id_and_absorb_to() {
+        let cli_action = CliAction::ClosePane {
+            pane_id: Some("terminal_18".to_string()),
+            absorb_to: Some("terminal_19".to_string()),
+        };
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert!(result.is_ok());
+        let actions = result.unwrap();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            Action::CloseFocusByPaneIdAbsorbingTo { pane_id, absorb_to } => {
+                assert!(matches!(pane_id, PaneId::Terminal(18)));
+                assert_eq!(absorb_to, "terminal_19");
+            },
+            _ => panic!("Expected CloseFocusByPaneIdAbsorbingTo action"),
+        }
     }
 
     // 17. RenamePane

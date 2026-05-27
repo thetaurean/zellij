@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
+* fork(thetaurean): `close-pane --absorb-to <name|id>` — close a tiled pane and direct its freed space to a specific surviving pane (by name or id) instead of zellij's default tree-left absorber. Patch 3 of the thetaurean fork series; see `FORK_NOTES.md`.
 
 ## [0.44.3] - 2026-05-13
 * fix(windows): bump windows-sys to 0.59 to align manifest with code, fixing source builds via `cargo install`/`cargo binstall` (https://github.com/zellij-org/zellij/pull/5139)

@@ -317,7 +317,9 @@ message HideFloatingPanesAction {
 message AreFloatingPanesVisibleAction {
   optional uint32 tab_id = 1;
 }
-message CloseFocusAction {}
+message CloseFocusAction {
+  optional string absorb_to = 1;
+}
 message UndoRenamePaneAction {}
 message NoOpAction {}
 message GoToNextTabAction {}
@@ -1230,7 +1232,10 @@ message EditScrollbackByPaneIdAction {
 }
 message ToggleFullscreenByPaneIdAction { PaneId pane_id = 1; }
 message TogglePaneEmbedOrFloatingByPaneIdAction { PaneId pane_id = 1; }
-message CloseFocusByPaneIdAction { PaneId pane_id = 1; }
+message CloseFocusByPaneIdAction {
+  PaneId pane_id = 1;
+  optional string absorb_to = 2;
+}
 message RenamePaneByPaneIdAction { PaneId pane_id = 1; bytes name = 2; }
 message UndoRenamePaneByPaneIdAction { PaneId pane_id = 1; }
 message TogglePanePinnedByPaneIdAction { PaneId pane_id = 1; }

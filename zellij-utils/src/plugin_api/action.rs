@@ -1125,6 +1125,7 @@ impl TryFrom<Action> for ProtobufAction {
             | Action::ToggleFocusFullscreenByPaneId { .. }
             | Action::TogglePaneEmbedOrFloatingByPaneId { .. }
             | Action::CloseFocusByPaneId { .. }
+            | Action::CloseFocusByPaneIdAbsorbingTo { .. }
             | Action::RenamePaneByPaneId { .. }
             | Action::UndoRenamePaneByPaneId { .. }
             | Action::TogglePanePinnedByPaneId { .. }
@@ -1956,6 +1957,7 @@ impl TryFrom<Action> for ProtobufAction {
             | Action::SaveSession
             | Action::ListTabs { .. }
             | Action::CurrentTabInfo { .. }
+            | Action::CloseFocusAbsorbingTo { .. }
             | Action::SetPaneColor { .. } => Err("Unsupported action"),
         }
     }

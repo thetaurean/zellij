@@ -1,8 +1,11 @@
 use super::{screen_thread_main, CopyOptions, Screen, ScreenInstruction};
 use crate::panes::PaneId;
 use crate::{
-    channels::SenderWithContext, os_input_output::ServerOsApi, route::route_action,
-    thread_bus::Bus, ClientId, ServerInstruction, SessionMetaData, ThreadSenders,
+    channels::SenderWithContext,
+    os_input_output::ServerOsApi,
+    route::{route_action, ActionCompletionResult},
+    thread_bus::Bus,
+    ClientId, ServerInstruction, SessionMetaData, ThreadSenders,
 };
 use insta::assert_snapshot;
 use std::net::{IpAddr, Ipv4Addr};
@@ -121,7 +124,7 @@ fn send_cli_action_to_server(
     session_metadata: &SessionMetaData,
     cli_action: CliAction,
     client_id: ClientId,
-) {
+) -> Vec<ActionCompletionResult> {
     let get_current_dir = || PathBuf::from(".");
     let actions = Action::actions_from_cli(cli_action, Box::new(get_current_dir), None).unwrap();
     let senders = session_metadata.senders.clone();
@@ -132,8 +135,9 @@ fn send_cli_action_to_server(
         .options
         .default_mode
         .unwrap_or(InputMode::Normal);
+    let mut completion_results = vec![];
     for action in actions {
-        route_action(
+        let (_, completion_result) = route_action(
             action,
             client_id,
             None,
@@ -145,7 +149,11 @@ fn send_cli_action_to_server(
             None,
         )
         .unwrap();
+        if let Some(completion_result) = completion_result {
+            completion_results.push(completion_result);
+        }
     }
+    completion_results
 }
 
 #[derive(Clone, Default)]
@@ -3662,7 +3670,10 @@ pub fn send_cli_close_pane_action() {
         ServerInstruction::KillSession,
         server_receiver
     );
-    let close_pane_action = CliAction::ClosePane { pane_id: None };
+    let close_pane_action = CliAction::ClosePane {
+        pane_id: None,
+        absorb_to: None,
+    };
     send_cli_action_to_server(&session_metadata, close_pane_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
@@ -6817,6 +6828,7 @@ pub fn send_cli_close_pane_with_pane_id() {
     std::thread::sleep(std::time::Duration::from_millis(100));
     let cli_action = CliAction::ClosePane {
         pane_id: Some("terminal_0".to_string()),
+        absorb_to: None,
     };
     send_cli_action_to_server(&session_metadata, cli_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -6824,6 +6836,243 @@ pub fn send_cli_close_pane_with_pane_id() {
     assert!(
         true,
         "ClosePane with pane_id CLI action completed without errors"
+    );
+}
+
+#[test]
+pub fn send_cli_close_pane_with_pane_id_absorbing_to() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 10;
+    let mut mock_screen = MockScreen::new(size);
+    let pty_receiver = mock_screen.pty_receiver.take().unwrap();
+    let session_metadata = mock_screen.clone_session_metadata();
+    let mut initial_layout = TiledPaneLayout::default();
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let received_pty_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+    let pty_thread = log_actions_in_thread!(
+        received_pty_instructions,
+        PtyInstruction::Exit,
+        pty_receiver
+    );
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let cli_action = CliAction::ClosePane {
+        pane_id: Some("terminal_0".to_string()),
+        absorb_to: Some("terminal_1".to_string()),
+    };
+    let completion_results = send_cli_action_to_server(&session_metadata, cli_action, client_id);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    mock_screen.teardown(vec![pty_thread, server_thread, screen_thread]);
+    assert_eq!(completion_results.len(), 1);
+    assert_ne!(completion_results[0].exit_status, Some(1));
+    assert_eq!(completion_results[0].error_message, None);
+    assert!(
+        received_pty_instructions
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|instruction| matches!(
+                instruction,
+                PtyInstruction::ClosePane(PaneId::Terminal(0), _)
+            )),
+        "expected PTY ClosePane for terminal_0"
+    );
+}
+
+#[test]
+pub fn send_cli_close_focused_pane_absorbing_to() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 10;
+    let mut mock_screen = MockScreen::new(size);
+    let pty_receiver = mock_screen.pty_receiver.take().unwrap();
+    let session_metadata = mock_screen.clone_session_metadata();
+    let mut initial_layout = TiledPaneLayout::default();
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![
+        TiledPaneLayout {
+            focus: Some(true),
+            ..Default::default()
+        },
+        TiledPaneLayout::default(),
+    ];
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let received_pty_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+    let pty_thread = log_actions_in_thread!(
+        received_pty_instructions,
+        PtyInstruction::Exit,
+        pty_receiver
+    );
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let cli_action = CliAction::ClosePane {
+        pane_id: None,
+        absorb_to: Some("terminal_1".to_string()),
+    };
+    let completion_results = send_cli_action_to_server(&session_metadata, cli_action, client_id);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    mock_screen.teardown(vec![pty_thread, server_thread, screen_thread]);
+    assert_eq!(completion_results.len(), 1);
+    assert_ne!(completion_results[0].exit_status, Some(1));
+    assert_eq!(completion_results[0].error_message, None);
+    assert!(
+        received_pty_instructions
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|instruction| matches!(
+                instruction,
+                PtyInstruction::ClosePane(PaneId::Terminal(0), _)
+            )),
+        "expected PTY ClosePane for focused terminal_0"
+    );
+}
+
+#[test]
+pub fn send_cli_close_pane_absorbing_to_missing_pane_reports_error_without_closing() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 10;
+    let mut mock_screen = MockScreen::new(size);
+    let pty_receiver = mock_screen.pty_receiver.take().unwrap();
+    let session_metadata = mock_screen.clone_session_metadata();
+    let mut initial_layout = TiledPaneLayout::default();
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let received_pty_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+    let pty_thread = log_actions_in_thread!(
+        received_pty_instructions,
+        PtyInstruction::Exit,
+        pty_receiver
+    );
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let cli_action = CliAction::ClosePane {
+        pane_id: Some("terminal_0".to_string()),
+        absorb_to: Some("terminal_99".to_string()),
+    };
+    let completion_results = send_cli_action_to_server(&session_metadata, cli_action, client_id);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    mock_screen.teardown(vec![pty_thread, server_thread, screen_thread]);
+    assert_eq!(completion_results.len(), 1);
+    assert_eq!(completion_results[0].exit_status, Some(1));
+    let error_message = completion_results[0]
+        .error_message
+        .as_deref()
+        .expect("expected route error message");
+    // After the name-resolver landed, an absent absorber surfaces via
+    // ERR_TARGET_PANE_NOT_FOUND_PREFIX ("Could not find tiled target pane: …")
+    // — the same helper Patch 1 uses for `--target-pane`.
+    assert!(
+        error_message.contains("Could not find tiled target pane"),
+        "expected missing absorber error, got: {error_message:?}"
+    );
+    assert!(
+        !received_pty_instructions
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|instruction| matches!(instruction, PtyInstruction::ClosePane(..))),
+        "did not expect any PTY ClosePane instruction"
+    );
+}
+
+#[test]
+pub fn send_cli_close_pane_absorbing_to_cross_tab_absorber_reports_error_without_closing() {
+    // Source pane and absorber must live in the same tab. When the user
+    // points `--absorb-to` at a pane id that exists in a sibling tab,
+    // tab-level name resolution surfaces "Could not find tiled target
+    // pane: …" (the lookup walks the SOURCE pane's tab only) and the
+    // PTY-close instruction is not sent.
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 10;
+    let mut mock_screen = MockScreen::new(size);
+    let pty_receiver = mock_screen.pty_receiver.take().unwrap();
+    let session_metadata = mock_screen.clone_session_metadata();
+    let mut initial_layout = TiledPaneLayout::default();
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_pty_instructions = Arc::new(Mutex::new(vec![]));
+    let pty_thread = log_actions_in_thread!(
+        received_pty_instructions,
+        PtyInstruction::Exit,
+        pty_receiver
+    );
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Open a second tab so we have pane ids living in different tabs.
+    let new_tab_action = CliAction::NewTab {
+        name: None,
+        layout: None,
+        layout_string: None,
+        layout_dir: None,
+        cwd: None,
+        initial_command: vec![],
+        initial_plugin: None,
+        close_on_exit: Default::default(),
+        start_suspended: Default::default(),
+        block_until_exit: false,
+        block_until_exit_success: false,
+        block_until_exit_failure: false,
+    };
+    send_cli_action_to_server(&session_metadata, new_tab_action, client_id);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Now try to close terminal_0 (tab1) absorbing to terminal_2 (tab2).
+    let cli_action = CliAction::ClosePane {
+        pane_id: Some("terminal_0".to_string()),
+        absorb_to: Some("terminal_2".to_string()),
+    };
+    let completion_results = send_cli_action_to_server(&session_metadata, cli_action, client_id);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    mock_screen.teardown(vec![pty_thread, screen_thread]);
+    assert_eq!(completion_results.len(), 1);
+    assert_eq!(completion_results[0].exit_status, Some(1));
+    let msg = completion_results[0]
+        .error_message
+        .as_deref()
+        .expect("expected error message");
+    assert!(
+        msg.contains("Could not find tiled target pane"),
+        "expected cross-tab lookup miss, got: {msg:?}"
+    );
+    assert!(
+        !received_pty_instructions
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|i| matches!(i, PtyInstruction::ClosePane(..))),
+        "did not expect any PTY ClosePane instruction"
     );
 }
 

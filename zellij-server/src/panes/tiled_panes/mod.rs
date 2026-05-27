@@ -960,9 +960,7 @@ impl TiledPanes {
         direction: Direction,
     ) -> Result<(), String> {
         if source == target {
-            return Err(
-                "source and target panes must be different".to_string(),
-            );
+            return Err("source and target panes must be different".to_string());
         }
         if !self.panes.contains_key(&source) {
             return Err(format!(
@@ -994,17 +992,13 @@ impl TiledPanes {
         // with a structural re-parent hasn't been validated.
         if let Some(pane) = self.panes.get(&source) {
             if pane.current_geom().is_stacked() {
-                return Err(
-                    "moving a stacked pane is not yet supported".to_string(),
-                );
+                return Err("moving a stacked pane is not yet supported".to_string());
             }
         }
         // Edge case: source already inside target's column-strip (Left/Right)
         // or already in target's slot (Up/Down). Either the move is a no-op
         // or the geometry collapses ambiguously. Bail out cleanly.
-        if let Some(group_ids) =
-            self.pane_ids_in_insert_group_near_pane_id(target, direction)
-        {
+        if let Some(group_ids) = self.pane_ids_in_insert_group_near_pane_id(target, direction) {
             if group_ids.contains(&source) {
                 return Err(
                     "source and target are already in the same group; move would be a no-op"
@@ -1026,9 +1020,7 @@ impl TiledPanes {
             pane_grid.fill_space_over_pane(source)
         };
         if !filled {
-            return Err(
-                "could not redistribute source pane's space to neighbors".to_string(),
-            );
+            return Err("could not redistribute source pane's space to neighbors".to_string());
         }
         // NOTE: unlike remove_pane (which calls self.set_pane_frames after fill_space_over_pane
         // to immediately refresh neighbor borders), we don't call it here. insert_pane_near_pane_id's
@@ -1038,12 +1030,12 @@ impl TiledPanes {
 
         // Step 2: take ownership of source from the outer map.
         let Some(source_pane) = self.panes.remove(&source) else {
-            return Err(
-                "source pane vanished between validation and extraction".to_string(),
-            );
+            return Err("source pane vanished between validation and extraction".to_string());
         };
         // Step 3: re-insert at the target location, reusing patch 1's helper.
-        if let Err(unused_source) = self.insert_pane_near_pane_id(target, source, source_pane, direction) {
+        if let Err(unused_source) =
+            self.insert_pane_near_pane_id(target, source, source_pane, direction)
+        {
             // Defensive: pre-validation passed but the actual insert failed. Recover the pane
             // by re-inserting into self.panes (with its old, now-overlapping geometry; user can
             // still interact with it and move it manually).
@@ -2844,6 +2836,39 @@ impl TiledPanes {
             }
             closed_pane
         }
+    }
+    pub fn remove_pane_absorbing_to(
+        &mut self,
+        pane_id: PaneId,
+        absorb_to: PaneId,
+    ) -> Result<Box<dyn Pane>, String> {
+        if pane_id == absorb_to {
+            return Err("closed pane and absorber pane must be different".to_string());
+        }
+        if !self.panes.contains_key(&pane_id) {
+            return Err(format!("pane {:?} not found in tiled layout", pane_id));
+        }
+        if !self.panes.contains_key(&absorb_to) {
+            return Err(format!(
+                "absorber pane {:?} not found in tiled layout",
+                absorb_to
+            ));
+        }
+
+        let mut pane_grid = TiledPaneGrid::new(
+            &mut self.panes,
+            &self.panes_to_hide,
+            *self.display_area.borrow(),
+            *self.viewport.borrow(),
+        );
+        pane_grid.fill_space_over_pane_absorbing_to(pane_id, absorb_to)?;
+        let closed_pane = self
+            .panes
+            .remove(&pane_id)
+            .ok_or_else(|| format!("pane {:?} vanished during close", pane_id))?;
+        self.move_clients_out_of_pane(pane_id);
+        self.set_pane_frames(self.draw_pane_frames);
+        Ok(closed_pane)
     }
     pub fn hold_pane(
         &mut self,

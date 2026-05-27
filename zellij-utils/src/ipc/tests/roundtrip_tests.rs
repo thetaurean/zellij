@@ -48,6 +48,45 @@ fn new_tiled_pane_rejects_non_tiled_placement() {
 }
 
 #[test]
+fn close_focus_absorbing_to_roundtrips_through_client_ipc() {
+    test_client_roundtrip!(ClientToServerMsg::Action {
+        action: Action::CloseFocusAbsorbingTo {
+            absorb_to: "terminal_2".to_string(),
+        },
+        terminal_id: Some(1),
+        client_id: Some(100),
+        is_cli_client: true,
+    });
+}
+
+#[test]
+fn close_focus_absorbing_to_by_name_roundtrips_through_client_ipc() {
+    // Names (not just id forms) survive the protobuf round-trip — the server
+    // resolves them against live pane state.
+    test_client_roundtrip!(ClientToServerMsg::Action {
+        action: Action::CloseFocusAbsorbingTo {
+            absorb_to: "editor".to_string(),
+        },
+        terminal_id: Some(1),
+        client_id: Some(100),
+        is_cli_client: true,
+    });
+}
+
+#[test]
+fn close_focus_by_pane_id_absorbing_to_roundtrips_through_client_ipc() {
+    test_client_roundtrip!(ClientToServerMsg::Action {
+        action: Action::CloseFocusByPaneIdAbsorbingTo {
+            pane_id: PaneId::Terminal(1),
+            absorb_to: "terminal_2".to_string(),
+        },
+        terminal_id: Some(1),
+        client_id: Some(100),
+        is_cli_client: true,
+    });
+}
+
+#[test]
 fn server_client_contract() {
     // here we test all possible values of each of the nested types in the server/client contract
     // in the context of its message.

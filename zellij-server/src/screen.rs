@@ -286,8 +286,7 @@ fn spawn_new_pane_in_tab(
             ..
         } = &new_pane_placement
         {
-            if let Some(error_message) =
-                tab.targeted_new_tiled_pane_error(target_pane, *direction)
+            if let Some(error_message) = tab.targeted_new_tiled_pane_error(target_pane, *direction)
             {
                 if let Some(completion) = completion_tx.as_mut() {
                     completion.set_error_message(error_message);
@@ -447,6 +446,7 @@ pub enum ScreenInstruction {
     HalfPageScrollDown(ClientId, Option<NotificationEnd>),
     ClearScroll(ClientId),
     CloseFocusedPane(ClientId, Option<NotificationEnd>),
+    CloseFocusedPaneAbsorbingTo(ClientId, String, Option<NotificationEnd>),
     ToggleActiveTerminalFullscreen(ClientId, Option<NotificationEnd>),
     TogglePaneFrames(Option<NotificationEnd>),
     SetSelectable(PaneId, bool),
@@ -880,6 +880,7 @@ pub enum ScreenInstruction {
     ToggleFullscreenWithPaneId(PaneId, Option<NotificationEnd>),
     TogglePaneEmbedOrFloatingWithPaneId(PaneId, Option<NotificationEnd>),
     CloseFocusWithPaneId(PaneId, Option<NotificationEnd>),
+    CloseFocusWithPaneIdAbsorbingTo(PaneId, String, Option<NotificationEnd>),
     RenamePaneWithPaneId(PaneId, Vec<u8>, Option<NotificationEnd>),
     UndoRenamePaneWithPaneId(PaneId, Option<NotificationEnd>),
     TogglePanePinnedWithPaneId(PaneId, Option<NotificationEnd>),
@@ -975,6 +976,9 @@ impl From<&ScreenInstruction> for ScreenContext {
             ScreenInstruction::HalfPageScrollDown(..) => ScreenContext::HalfPageScrollDown,
             ScreenInstruction::ClearScroll(..) => ScreenContext::ClearScroll,
             ScreenInstruction::CloseFocusedPane(..) => ScreenContext::CloseFocusedPane,
+            ScreenInstruction::CloseFocusedPaneAbsorbingTo(..) => {
+                ScreenContext::CloseFocusedPaneAbsorbingTo
+            },
             ScreenInstruction::ToggleActiveTerminalFullscreen(..) => {
                 ScreenContext::ToggleActiveTerminalFullscreen
             },
@@ -1225,6 +1229,9 @@ impl From<&ScreenInstruction> for ScreenContext {
                 ScreenContext::TogglePaneEmbedOrFloatingWithPaneId
             },
             ScreenInstruction::CloseFocusWithPaneId(..) => ScreenContext::CloseFocusWithPaneId,
+            ScreenInstruction::CloseFocusWithPaneIdAbsorbingTo(..) => {
+                ScreenContext::CloseFocusWithPaneIdAbsorbingTo
+            },
             ScreenInstruction::RenamePaneWithPaneId(..) => ScreenContext::RenamePaneWithPaneId,
             ScreenInstruction::UndoRenamePaneWithPaneId(..) => {
                 ScreenContext::UndoRenamePaneWithPaneId
@@ -6876,6 +6883,45 @@ pub(crate) fn screen_thread_main(
                 screen.render(None)?;
                 screen.log_and_report_session_state()?;
             },
+            ScreenInstruction::CloseFocusedPaneAbsorbingTo(
+                client_id,
+                absorb_to,
+                mut completion_tx,
+            ) => {
+                // The tab method owns the PTY-close on success and leaves
+                // `completion_tx` in `Some(..)` on failure so we can surface
+                // the message to the CLI client below.
+                let close_result = match screen.get_active_tab_mut(client_id) {
+                    Ok(tab) => tab.close_focused_pane_absorbing_to(
+                        client_id,
+                        &absorb_to,
+                        &mut completion_tx,
+                    ),
+                    Err(_) => {
+                        if let Some(client_id) = screen.get_first_client_id() {
+                            match screen.get_active_tab_mut(client_id) {
+                                Ok(tab) => tab.close_focused_pane_absorbing_to(
+                                    client_id,
+                                    &absorb_to,
+                                    &mut completion_tx,
+                                ),
+                                Err(err) => Err(err.to_string()),
+                            }
+                        } else {
+                            Err("No client ids in screen found".to_string())
+                        }
+                    },
+                };
+                if let Err(message) = close_result {
+                    log::warn!("close-pane --absorb-to failed: {}", message);
+                    if let Some(ref mut c) = completion_tx {
+                        c.set_exit_status(1);
+                        c.set_error_message(message);
+                    }
+                }
+                screen.render(None)?;
+                screen.log_and_report_session_state()?;
+            },
             ScreenInstruction::SetSelectable(pid, selectable) => {
                 let all_tabs = screen.get_tabs_mut();
                 let mut found_plugin = false;
@@ -9743,20 +9789,14 @@ pub(crate) fn screen_thread_main(
                                 target_pane_id, source_pane_id
                             ));
                         } else {
-                            result = tab.move_pane_to_pane_id(
-                                source_pane_id,
-                                target_pane_id,
-                                direction,
-                            );
+                            result =
+                                tab.move_pane_to_pane_id(source_pane_id, target_pane_id, direction);
                         }
                         break;
                     }
                 }
                 if !found_tab {
-                    result = Err(format!(
-                        "source pane {:?} not found",
-                        source_pane_id
-                    ));
+                    result = Err(format!("source pane {:?} not found", source_pane_id));
                 }
                 if let Err(message) = result {
                     log::warn!("move-pane --to-pane-id failed: {}", message);
@@ -9882,6 +9922,44 @@ pub(crate) fn screen_thread_main(
                 }
                 if !found {
                     log::error!("Pane with id {:?} not found", pane_id);
+                }
+                screen.render(None)?;
+                screen.log_and_report_session_state()?;
+            },
+            ScreenInstruction::CloseFocusWithPaneIdAbsorbingTo(
+                pane_id,
+                absorb_to,
+                mut completion_tx,
+            ) => {
+                // Find the tab containing the source pane; tab-level resolution
+                // then validates `absorb_to` against the same tab and surfaces
+                // a clear "not found" or "ambiguous" error if it can't be
+                // matched. The tab method owns the PTY-close on success.
+                let all_tabs = screen.get_tabs_mut();
+                let mut found = false;
+                let mut close_result: Result<(), String> = Ok(());
+                for tab in all_tabs.values_mut() {
+                    if tab.has_pane_with_pid(&pane_id) {
+                        found = true;
+                        close_result = tab.close_pane_absorbing_to(
+                            pane_id,
+                            &absorb_to,
+                            false,
+                            None,
+                            &mut completion_tx,
+                        );
+                        break;
+                    }
+                }
+                if !found {
+                    close_result = Err(format!("Pane with id {:?} not found", pane_id));
+                }
+                if let Err(message) = close_result {
+                    log::warn!("close-pane --absorb-to failed: {}", message);
+                    if let Some(ref mut c) = completion_tx {
+                        c.set_exit_status(1);
+                        c.set_error_message(message);
+                    }
                 }
                 screen.render(None)?;
                 screen.log_and_report_session_state()?;

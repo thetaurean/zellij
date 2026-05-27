@@ -525,6 +525,8 @@ pub struct AreFloatingPanesVisibleAction {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CloseFocusAction {
+    #[prost(string, optional, tag="1")]
+    pub absorb_to: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -2078,6 +2080,8 @@ pub struct TogglePaneEmbedOrFloatingByPaneIdAction {
 pub struct CloseFocusByPaneIdAction {
     #[prost(message, optional, tag="1")]
     pub pane_id: ::core::option::Option<PaneId>,
+    #[prost(string, optional, tag="2")]
+    pub absorb_to: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

@@ -1266,7 +1266,12 @@ impl From<crate::input::actions::Action>
                 })
             },
             crate::input::actions::Action::CloseFocus => {
-                ActionType::CloseFocus(CloseFocusAction {})
+                ActionType::CloseFocus(CloseFocusAction { absorb_to: None })
+            },
+            crate::input::actions::Action::CloseFocusAbsorbingTo { absorb_to } => {
+                ActionType::CloseFocus(CloseFocusAction {
+                    absorb_to: Some(absorb_to),
+                })
             },
             crate::input::actions::Action::PaneNameInput { input } => {
                 ActionType::PaneNameInput(PaneNameInputAction {
@@ -1801,6 +1806,13 @@ impl From<crate::input::actions::Action>
             crate::input::actions::Action::CloseFocusByPaneId { pane_id } => {
                 ActionType::CloseFocusByPaneId(CloseFocusByPaneIdAction {
                     pane_id: Some(pane_id.into()),
+                    absorb_to: None,
+                })
+            },
+            crate::input::actions::Action::CloseFocusByPaneIdAbsorbingTo { pane_id, absorb_to } => {
+                ActionType::CloseFocusByPaneId(CloseFocusByPaneIdAction {
+                    pane_id: Some(pane_id.into()),
+                    absorb_to: Some(absorb_to),
                 })
             },
             crate::input::actions::Action::RenamePaneByPaneId { pane_id, name } => {
@@ -2142,7 +2154,12 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                     tab_id: a.tab_id.map(|id| id as usize),
                 })
             },
-            ActionType::CloseFocus(_) => Ok(crate::input::actions::Action::CloseFocus),
+            ActionType::CloseFocus(a) => match a.absorb_to {
+                Some(absorb_to) => Ok(crate::input::actions::Action::CloseFocusAbsorbingTo {
+                    absorb_to,
+                }),
+                None => Ok(crate::input::actions::Action::CloseFocus),
+            },
             ActionType::PaneNameInput(pane_name_action) => {
                 Ok(crate::input::actions::Action::PaneNameInput {
                     input: pane_name_action
@@ -2746,12 +2763,19 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                 },
             ),
             ActionType::CloseFocusByPaneId(a) => {
-                Ok(crate::input::actions::Action::CloseFocusByPaneId {
-                    pane_id: a
-                        .pane_id
-                        .ok_or_else(|| anyhow!("CloseFocusByPaneId missing pane_id"))?
-                        .try_into()?,
-                })
+                let pane_id = a
+                    .pane_id
+                    .ok_or_else(|| anyhow!("CloseFocusByPaneId missing pane_id"))?
+                    .try_into()?;
+                match a.absorb_to {
+                    Some(absorb_to) => Ok(
+                        crate::input::actions::Action::CloseFocusByPaneIdAbsorbingTo {
+                            pane_id,
+                            absorb_to,
+                        },
+                    ),
+                    None => Ok(crate::input::actions::Action::CloseFocusByPaneId { pane_id }),
+                }
             },
             ActionType::RenamePaneByPaneId(a) => {
                 Ok(crate::input::actions::Action::RenamePaneByPaneId {

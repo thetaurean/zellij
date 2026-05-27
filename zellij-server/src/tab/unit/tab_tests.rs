@@ -16361,6 +16361,404 @@ pub fn close_pane_by_pane_id() {
 }
 
 #[test]
+pub fn close_pane_absorbing_to_adjacent_pane_grows_absorber() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 20));
+
+    tab.close_pane_absorbing_to(
+        PaneId::Terminal(1),
+        "terminal_2",
+        false,
+        None,
+        &mut None,
+    )
+    .unwrap();
+
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 0, 120, 20));
+}
+
+#[test]
+pub fn close_pane_without_absorb_to_preserves_default_growth_order() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab.horizontal_split(PaneId::Terminal(3), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 10, 60, 10));
+
+    tab.close_pane(PaneId::Terminal(1), false, None);
+
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 0, 120, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 10, 120, 10));
+}
+
+#[test]
+pub fn close_pane_absorbing_to_same_pane_returns_error_without_closing() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    let result = tab.close_pane_absorbing_to(
+        PaneId::Terminal(1),
+        "terminal_1",
+        false,
+        None,
+        &mut None,
+    );
+
+    assert!(result.is_err(), "expected same-pane absorb to error");
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 20));
+}
+
+#[test]
+pub fn close_pane_absorbing_to_non_adjacent_pane_returns_error_without_closing() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab.horizontal_split(PaneId::Terminal(3), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 10, 60, 10));
+
+    let result = tab.close_pane_absorbing_to(
+        PaneId::Terminal(2),
+        "terminal_1",
+        false,
+        None,
+        &mut None,
+    );
+
+    assert!(result.is_err(), "expected non-adjacent absorb to error");
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(2)));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 10, 60, 10));
+}
+
+#[test]
+pub fn close_pane_absorbing_to_grouped_adjacent_pane_returns_error_without_closing() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab.horizontal_split(PaneId::Terminal(3), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 10, 60, 10));
+
+    let result = tab.close_pane_absorbing_to(
+        PaneId::Terminal(1),
+        "terminal_2",
+        false,
+        None,
+        &mut None,
+    );
+
+    assert!(
+        result.is_err(),
+        "expected grouped adjacent absorber to error"
+    );
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 10, 60, 10));
+}
+
+#[test]
+pub fn close_pane_absorbing_to_rejects_fullscreen_without_mutating_layout() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab.horizontal_split(PaneId::Terminal(3), None, 1, None, None)
+        .unwrap();
+    tab.toggle_active_pane_fullscreen(1);
+    assert!(tab.tiled_panes.fullscreen_is_active());
+
+    let pane_1_geom = pane_geom(&tab, PaneId::Terminal(1));
+    let pane_2_geom = pane_geom(&tab, PaneId::Terminal(2));
+    let pane_3_geom = pane_geom(&tab, PaneId::Terminal(3));
+
+    let result = tab.close_pane_absorbing_to(
+        PaneId::Terminal(1),
+        "terminal_2",
+        false,
+        None,
+        &mut None,
+    );
+
+    assert!(result.is_err(), "expected fullscreen absorb to error");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("fullscreen"),
+        "error should mention fullscreen, got: {msg:?}"
+    );
+    assert!(tab.tiled_panes.fullscreen_is_active());
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(2)));
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(3)));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), pane_1_geom);
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), pane_2_geom);
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), pane_3_geom);
+}
+
+#[test]
+pub fn close_pane_absorbing_to_vertical_neighbor_grows_absorber() {
+    // Mirror of the horizontal-axis happy path, but the absorber sits below
+    // the closer along a vertical aligning border. Exercises the
+    // SplitDirection::Vertical branch of `find_panes_to_grow_absorbing_to`.
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.horizontal_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 10, 120, 10));
+
+    tab.close_pane_absorbing_to(
+        PaneId::Terminal(1),
+        "terminal_2",
+        false,
+        None,
+        &mut None,
+    )
+    .unwrap();
+
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 0, 120, 20));
+}
+
+#[test]
+pub fn close_pane_absorbing_to_rejects_floating_closer() {
+    // The closer must be a tiled pane; floating panes don't participate
+    // in the grow-the-aligning-neighbor flow.
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+    tab.new_floating_pane(PaneId::Terminal(2), None, None, false, true, None, None)
+        .unwrap();
+
+    let result = tab.close_pane_absorbing_to(
+        PaneId::Terminal(2),
+        "terminal_1",
+        false,
+        None,
+        &mut None,
+    );
+
+    assert!(result.is_err(), "expected Err when closer is floating");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("tiled") || msg.contains("floating"),
+        "error should mention tiled/floating, got: {msg:?}"
+    );
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(2)));
+}
+
+#[test]
+pub fn close_pane_absorbing_to_rejects_floating_absorber() {
+    // The absorber must be a tiled pane — the name-resolver only walks
+    // tiled panes, so a floating absorber surfaces as "not found".
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab.new_floating_pane(PaneId::Terminal(3), None, None, false, true, None, None)
+        .unwrap();
+
+    let result = tab.close_pane_absorbing_to(
+        PaneId::Terminal(1),
+        "terminal_3",
+        false,
+        None,
+        &mut None,
+    );
+
+    assert!(result.is_err(), "expected Err when absorber is floating");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("Could not find tiled target pane"),
+        "error should mention tiled-target lookup, got: {msg:?}"
+    );
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(3)));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 20));
+}
+
+#[test]
+pub fn close_pane_absorbing_to_rejects_stacked_closer() {
+    // After stacking T2 under T1, both panes are part of the stack and
+    // `fill_space_over_pane_absorbing_to` rejects stacked panes outright.
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+    tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::Stacked {
+            pane_id_to_stack_under: Some(zellij_utils::data::PaneId::Terminal(1)),
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    let result = tab.close_pane_absorbing_to(
+        PaneId::Terminal(1),
+        "terminal_2",
+        false,
+        None,
+        &mut None,
+    );
+
+    assert!(result.is_err(), "expected Err when closer is stacked");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("stacked") || msg.contains("not support"),
+        "error should mention stacked, got: {msg:?}"
+    );
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(2)));
+}
+
+#[test]
+pub fn close_pane_absorbing_to_rejects_suppressed_closer() {
+    // `replace_active_pane_with_editor_pane` keys suppressed_panes by the
+    // EDITOR pane id (the visible placeholder), so passing that id as the
+    // closer should trip the suppressed guard at tab/mod.rs:4400.
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    // Replace the active T2 with a scrollback-editor pane that ALSO has
+    // id T2 (mirrors the existing `write_to_suppressed_pane` test). After
+    // this call, suppressed_panes[Terminal(2)] holds the original T2 and
+    // the visible tiled T2 is the editor.
+    tab.replace_active_pane_with_editor_pane(PaneId::Terminal(2), 1)
+        .unwrap();
+    assert!(tab.suppressed_panes.contains_key(&PaneId::Terminal(2)));
+
+    let result = tab.close_pane_absorbing_to(
+        PaneId::Terminal(2),
+        "terminal_1",
+        false,
+        None,
+        &mut None,
+    );
+
+    assert!(result.is_err(), "expected Err when closer is suppressed");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("suppressed"),
+        "error should mention suppressed, got: {msg:?}"
+    );
+}
+
+#[test]
+pub fn close_focused_pane_absorbing_to_rejects_floating_focus() {
+    // `close_focused_pane_absorbing_to` only operates on the tiled layer;
+    // if the focused pane is a visible floating pane the call should fail.
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab.new_floating_pane(PaneId::Terminal(3), None, None, false, true, None, None)
+        .unwrap();
+    assert!(tab.floating_panes.panes_are_visible());
+
+    let result = tab.close_focused_pane_absorbing_to(1, "terminal_2", &mut None);
+
+    assert!(result.is_err(), "expected Err when focused pane is floating");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("tiled") || msg.contains("floating"),
+        "error should mention tiled/floating, got: {msg:?}"
+    );
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(2)));
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(3)));
+}
+
+#[test]
+pub fn close_pane_absorbing_to_resolves_pane_name() {
+    // Names (custom_title / current_title) resolve to ids, matching
+    // Patch 1's `--target-pane <name|id>`. Sanity check that the
+    // name-resolution path is wired up.
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    // Give T2 a custom title so the name lookup has something to match.
+    tab.rename_pane(b"editor".to_vec(), PaneId::Terminal(2)).ok();
+
+    tab.close_pane_absorbing_to(PaneId::Terminal(1), "editor", false, None, &mut None)
+        .unwrap();
+
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 0, 120, 20));
+}
+
+#[test]
 pub fn resize_by_pane_id() {
     let size = Size {
         cols: 121,
@@ -17159,10 +17557,7 @@ fn move_pane_with_stacked_source_returns_error() {
     // T1 is stacked -- moving it should be rejected
     let result =
         tab.move_pane_to_pane_id(PaneId::Terminal(1), PaneId::Terminal(2), Direction::Right);
-    assert!(
-        result.is_err(),
-        "expected Err when source pane is stacked"
-    );
+    assert!(result.is_err(), "expected Err when source pane is stacked");
     let msg = result.unwrap_err();
     assert!(
         msg.contains("stacked") || msg.contains("not yet supported"),

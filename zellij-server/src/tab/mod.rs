@@ -147,10 +147,8 @@ const MAX_PENDING_VTE_EVENTS: usize = 7000;
 // Error messages surfaced by `--target-pane` placement. Hoisted as consts so
 // callers (and tests) can match them by equality instead of substring.
 pub const ERR_TARGET_PANE_NOT_FOUND_PREFIX: &str = "Could not find tiled target pane:";
-pub const ERR_TARGET_PANE_AMBIGUOUS_PREFIX: &str =
-    "Multiple tiled panes match target pane name:";
-pub const ERR_CANNOT_INSERT_NEAR_TARGET_PREFIX: &str =
-    "Could not insert pane near target pane";
+pub const ERR_TARGET_PANE_AMBIGUOUS_PREFIX: &str = "Multiple tiled panes match target pane name:";
+pub const ERR_CANNOT_INSERT_NEAR_TARGET_PREFIX: &str = "Could not insert pane near target pane";
 pub const ERR_CANNOT_MAKE_ROOM_WITHOUT_CLOSING_TARGET: &str =
     "Could not make room for targeted pane without closing target pane";
 
@@ -1855,12 +1853,8 @@ impl Tab {
             if let Err(error_message) =
                 self.close_down_to_max_terminals_excluding(&protected_pane_ids)
             {
-                self.close_new_pane_with_error(
-                    pid,
-                    blocking_notification,
-                    error_message.clone(),
-                )
-                .with_context(err_context)?;
+                self.close_new_pane_with_error(pid, blocking_notification, error_message.clone())
+                    .with_context(err_context)?;
                 return Err(anyhow!(error_message)).with_context(err_context);
             }
             // Re-resolve after the close. The protected set guarantees the
@@ -1967,10 +1961,8 @@ impl Tab {
             self.senders
                 .send_to_pty(PtyInstruction::ClosePane(pid, None))
                 .with_context(err_context)?;
-            return Err(anyhow!(
-                "internal: target pane id missing after validation"
-            ))
-            .with_context(err_context);
+            return Err(anyhow!("internal: target pane id missing after validation"))
+                .with_context(err_context);
         };
 
         if self.tiled_panes.fullscreen_is_active() {
@@ -4381,6 +4373,9 @@ impl Tab {
                 closed_pane.update_exit_status(exit_status);
             }
         }
+        self.notify_pane_closed(id);
+    }
+    fn notify_pane_closed(&self, id: PaneId) {
         let _ = self.senders.send_to_plugin(PluginInstruction::Update(vec![(
             None,
             None,
@@ -4391,6 +4386,57 @@ impl Tab {
             .send_to_screen(ScreenInstruction::NotifyPaneClosedToSubscribers {
                 pane_id: id.into(),
             });
+    }
+    /// Close the tiled pane `id`, growing `absorb_to` (an unresolved name or
+    /// id form) into the freed space. The absorber must be the sole pane
+    /// along `id`'s aligning border — `tiled_pane_grid::find_panes_to_grow_absorbing_to`
+    /// enforces that.
+    ///
+    /// On success, owns `completion_tx` and forwards it to the PTY-close
+    /// instruction. On error, leaves `completion_tx` in `Some(..)` so the
+    /// caller can surface the message via `set_error_message`/`set_exit_status`.
+    pub fn close_pane_absorbing_to(
+        &mut self,
+        id: PaneId,
+        absorb_to: &str,
+        ignore_suppressed_panes: bool,
+        exit_status: Option<i32>,
+        completion_tx: &mut Option<NotificationEnd>,
+    ) -> Result<(), String> {
+        if !ignore_suppressed_panes && self.suppressed_panes.contains_key(&id) {
+            return Err("close-pane --absorb-to does not support suppressed panes".to_string());
+        }
+        if self.floating_panes.panes_contain(&id) {
+            return Err("close-pane --absorb-to requires a tiled pane to close".to_string());
+        }
+        if self.tiled_panes.fullscreen_is_active() {
+            return Err(
+                "cannot close pane with --absorb-to while fullscreen is active".to_string(),
+            );
+        }
+        // Resolve the absorber identifier (name|id) against the same tab.
+        // Mirrors Patch 1's `--target-pane <name|id>` resolution.
+        let absorb_to_id = self.resolve_tiled_target_pane_id(absorb_to)?;
+        if id == absorb_to_id {
+            return Err("closed pane and absorber pane must be different".to_string());
+        }
+
+        let mut closed_pane = self
+            .tiled_panes
+            .remove_pane_absorbing_to(id, absorb_to_id)?;
+        self.set_force_render();
+        self.tiled_panes.set_force_render();
+        self.swap_layouts.set_is_tiled_damaged();
+        if let Some(exit_status) = exit_status {
+            closed_pane.update_exit_status(exit_status);
+        }
+        self.notify_pane_closed(id);
+        // Hand off `completion_tx` to the PTY layer so the CLI client gets
+        // an `Ok` exit status once the close actually finishes.
+        self.senders
+            .send_to_pty(PtyInstruction::ClosePane(id, completion_tx.take()))
+            .map_err(|e| format!("failed to send PtyInstruction::ClosePane: {e}"))?;
+        Ok(())
     }
     pub fn extract_pane(
         &mut self,
@@ -4572,6 +4618,26 @@ impl Tab {
                 .with_context(|| err_context(active_pane_id))?;
         }
         Ok(())
+    }
+    /// Close the focused tiled pane and grow `absorb_to` (an unresolved
+    /// name or id form) into its space. See `close_pane_absorbing_to` for
+    /// `completion_tx` semantics.
+    pub fn close_focused_pane_absorbing_to(
+        &mut self,
+        client_id: ClientId,
+        absorb_to: &str,
+        completion_tx: &mut Option<NotificationEnd>,
+    ) -> Result<(), String> {
+        if self.floating_panes.panes_are_visible()
+            && self.floating_panes.active_pane_id(client_id).is_some()
+        {
+            return Err("close-pane --absorb-to requires a tiled focused pane".to_string());
+        }
+        let active_pane_id = self
+            .tiled_panes
+            .get_active_pane_id(client_id)
+            .ok_or_else(|| format!("no focused tiled pane found for client {client_id}"))?;
+        self.close_pane_absorbing_to(active_pane_id, absorb_to, false, None, completion_tx)
     }
     pub fn clear_active_terminal_screen(&mut self, client_id: ClientId) -> Result<()> {
         if let Some(active_pane) = self.get_active_pane_or_floating_pane_mut(client_id) {
@@ -6488,9 +6554,7 @@ impl Tab {
         // the fullscreen state is more surprising than asking the user to exit fullscreen
         // explicitly. If we ever add a `--force` flag we'd auto-unset here.
         if self.tiled_panes.fullscreen_is_active() {
-            return Err(
-                "cannot move pane while fullscreen is active".to_string(),
-            );
+            return Err("cannot move pane while fullscreen is active".to_string());
         }
         self.tiled_panes
             .move_pane_to_pane_id(source, target, direction)?;

@@ -99,9 +99,64 @@ Cases that error cleanly (no panic, exit status 1, clear message):
   be a no-op or ambiguous)
 - Source or target pane doesn't exist in the tab
 
-### v0.44.3-gabi.3 — `close-pane --absorb-to` (Patch 3 of 3, pending)
+### v0.44.3-gabi.3 — `close-pane --absorb-to <name|id>` (Patch 3 of 3)
 
-Not yet implemented.
+Adds a CLI flag that closes a tiled pane and directs its freed space to a
+specific surviving pane, instead of zellij's default "give the space to
+the tree-left neighbor."
+
+```sh
+zellij action close-pane --absorb-to editor                    # close focused pane, absorber by name
+zellij action close-pane --pane-id terminal_5 --absorb-to editor
+zellij action close-pane --pane-id terminal_5 --absorb-to terminal_3
+```
+
+`<name|id>` accepts the same forms as Patch 1's `--target-pane`:
+
+- A custom pane title (set via `--name` or `RenamePane`).
+- A process title (e.g. `vim`).
+- A pane-id form: `terminal_<n>`, `plugin_<n>`, or a bare `<n>`.
+
+If two tiled panes in the same tab share a name, the call errors with an
+"ambiguous" message; pass the pane-id form to disambiguate.
+
+#### Absorber constraint
+
+The absorber must be the **sole pane along the closing pane's aligning
+border** — no co-aligned neighbors on that side. Concretely: if the closer
+sits next to a vstack of two panes, neither pane alone can absorb the
+freed space; the call errors with "absorber pane … is not the complete
+adjacent aligning target." Use `move-pane` first to clear the side, or
+target a single-pane neighbor.
+
+#### Scope and known gaps
+
+This patch is **CLI-only for v1.**
+
+- **Plugin API.** Plugins cannot dispatch `Action::CloseFocusAbsorbingTo`
+  or `Action::CloseFocusByPaneIdAbsorbingTo`; both land in the
+  `"Unsupported action"` arm of the plugin protobuf converter, matching
+  the existing `CloseFocusByPaneId` treatment.
+
+- **KDL keybinds.** Not yet wired to the KDL parser. Use a CLI command in
+  a keybind body (`zellij action close-pane --absorb-to ...`) as a
+  workaround.
+
+- **Stacked and floating panes.** The closer must be a non-stacked tiled
+  pane; the absorber must also be tiled. Stacked-pane support is
+  deferred (the underlying grow-the-aligning-neighbor logic doesn't yet
+  reason about stack geometry).
+
+Cases that error cleanly (no panic, exit status 1, clear message):
+
+- `id == absorb_to`
+- Closer is floating or suppressed
+- Closer or absorber is stacked
+- Fullscreen is active (exit fullscreen first)
+- Absorber name doesn't resolve in the same tab as the closer
+- Absorber resolves to multiple panes (ambiguous name)
+- Absorber is not the complete adjacent aligning group (other panes
+  share that border with the closer)
 
 ## Versioning
 

@@ -951,6 +951,15 @@ pub(crate) fn route_action(
                 ))
                 .with_context(err_context)?;
         },
+        Action::CloseFocusAbsorbingTo { absorb_to } => {
+            senders
+                .send_to_screen(ScreenInstruction::CloseFocusedPaneAbsorbingTo(
+                    client_id,
+                    absorb_to,
+                    Some(NotificationEnd::new(completion_tx)),
+                ))
+                .with_context(err_context)?;
+        },
         Action::NewTab {
             tiled_layout: tab_layout,
             floating_layouts: floating_panes_layout,
@@ -1982,6 +1991,15 @@ pub(crate) fn route_action(
             senders
                 .send_to_screen(ScreenInstruction::CloseFocusWithPaneId(
                     pane_id.into(),
+                    Some(NotificationEnd::new(completion_tx)),
+                ))
+                .with_context(err_context)?;
+        },
+        Action::CloseFocusByPaneIdAbsorbingTo { pane_id, absorb_to } => {
+            senders
+                .send_to_screen(ScreenInstruction::CloseFocusWithPaneIdAbsorbingTo(
+                    pane_id.into(),
+                    absorb_to,
                     Some(NotificationEnd::new(completion_tx)),
                 ))
                 .with_context(err_context)?;
