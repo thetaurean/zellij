@@ -1,3 +1,38 @@
+> **Fork notice — `thetaurean/zellij`**
+>
+> This is a fork of upstream [zellij](https://github.com/zellij-org/zellij) with three pane-targeting CLI primitives used by [gabi](https://github.com/thetaurean/gabi). The Homebrew formula installs the binary as **`zellij-gabi`** so it can coexist with a vanilla `zellij`. The patches are intended for eventual upstream PRs; this fork is the staging area while those are prepared.
+>
+> ### Install
+>
+> ```sh
+> brew tap thetaurean/tap
+> brew install thetaurean/tap/zellij-gabi
+> ```
+>
+> For development builds against the `gabi-pane-primitives` branch, use `brew install --HEAD thetaurean/tap/zellij-gabi`.
+>
+> ### Patches in this fork
+>
+> | Patch | CLI surface | Why |
+> | --- | --- | --- |
+> | new-pane targeting | `zellij-gabi action new-pane --target-pane <name\|id> --direction <Left\|Right\|Up\|Down>` | Spawn anchored to a named pane, not the focused pane. Removes focus races in TUI orchestrators and avoids nesting inside vstacks. |
+> | move-pane targeting | `zellij-gabi action move-pane <Left\|Right\|Up\|Down> --pane-id <source-id> --to-pane-id <dest-id>` | Structural re-parent to an explicit destination, not the focus-history geom swap that ships in upstream. |
+> | close-pane absorb | `zellij-gabi action close-pane --absorb-to <name\|id>` | Direct the freed space to an explicit surviving pane instead of the tree-left default. |
+>
+> ### Version mapping
+>
+> | Tag | Upstream base | Patches included |
+> | --- | --- | --- |
+> | `v0.44.3-gabi.1` | `v0.44.3` | new-pane targeting, move-pane targeting, close-pane absorb |
+>
+> ### Upstream PR status
+>
+> PRs to `zellij-org/zellij` are not yet filed. Planned cadence: new-pane targeting first, then close-pane absorb, then move-pane targeting (in decreasing order of motivation / ease-of-review). See [the gabi fork plan](https://github.com/thetaurean/gabi/blob/phase-2/docs/superpowers/plans/2026-05-26-zellij-fork.md#upstream-pr-strategy) for context.
+>
+> ---
+>
+> _Upstream README continues below._
+
 <h1 align="center">
   <br>
   <img src="https://raw.githubusercontent.com/zellij-org/zellij/main/assets/logo.png" alt="logo" width="200">
