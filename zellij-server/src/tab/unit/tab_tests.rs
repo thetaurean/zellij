@@ -16462,7 +16462,11 @@ pub fn close_pane_absorbing_to_non_adjacent_pane_returns_error_without_closing()
 }
 
 #[test]
-pub fn close_pane_absorbing_to_grouped_adjacent_pane_returns_error_without_closing() {
+pub fn close_pane_absorbing_to_grouped_adjacent_pane_grows_whole_group() {
+    // Multi-pane absorber: T1's right aligning group is [T2, T3] (a
+    // column-strip vstack). Closing with `--absorb-to terminal_2` grows
+    // the whole [T2, T3] column into T1's freed columns — T2 and T3 keep
+    // their relative vertical split and just become wider.
     let size = Size {
         cols: 120,
         rows: 20,
@@ -16477,22 +16481,18 @@ pub fn close_pane_absorbing_to_grouped_adjacent_pane_returns_error_without_closi
     assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 10));
     assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 10, 60, 10));
 
-    let result = tab.close_pane_absorbing_to(
+    tab.close_pane_absorbing_to(
         PaneId::Terminal(1),
         "terminal_2",
         false,
         None,
         &mut None,
-    );
+    )
+    .expect("grouped absorber should succeed — whole column-strip grows together");
 
-    assert!(
-        result.is_err(),
-        "expected grouped adjacent absorber to error"
-    );
-    assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
-    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
-    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 10));
-    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 10, 60, 10));
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(1)));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 0, 120, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 10, 120, 10));
 }
 
 #[test]
@@ -16756,6 +16756,142 @@ pub fn close_pane_absorbing_to_resolves_pane_name() {
 
     assert!(!tab.has_pane_with_pid(&PaneId::Terminal(1)));
     assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 0, 120, 20));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cross-patch end-to-end test
+//
+// Mirrors the plan's "Cross-Patch Test Plan" section. Walks all six plan
+// bullets end-to-end across Patches 1 and 3 (and the three follow-up fixes
+// surfaced while writing this test):
+//
+//   * Patch 1 column-strip filter compares rendered cells (`as_usize()`)
+//     rather than full `Dimension` equality.
+//   * Patch 3 `fill_space_over_pane_absorbing_to` falls back to
+//     cells/display-area when `as_percent()` returns None for Fixed dims.
+//   * Patch 3 `find_panes_to_grow_absorbing_to` accepts any aligning group
+//     that CONTAINS `absorb_to` and grows the whole group together (used
+//     by gabi's drawer-and-thread layout).
+//
+// Layout walk (120×20 tab):
+//
+//   Step 1.  A | B | C via two vsplits (widths 60/30/30):
+//              A = T1 = (0,  0, 60, 20)
+//              B = T2 = (60, 0, 30, 20)
+//              C = T3 = (90, 0, 30, 20)
+//
+//   Step 2.  Patch 1 spawn D below B. B halves vertically; D is the
+//            new sibling.
+//              B = (60,  0, 30, 10)
+//              D = (60, 10, 30, 10)
+//
+//   Step 3.  Patch 1 spawn T left of B. T inserts at the top level
+//            (column-strip filter matches B and D by rendered cells).
+//              T = (60, 0, 15, 20)
+//              B = (75, 0, 15, 10)
+//              D = (75, 10, 15, 10)
+//
+//   Step 4.  Patch 3 close T --absorb-to B. T's right aligning group is
+//            [B, D]; with multi-pane absorber support, the whole [B, D]
+//            column grows into T's freed columns.
+//              B = (60,  0, 30, 10)
+//              D = (60, 10, 30, 10)
+//              (drawer geometry intact — plan bullet 6)
+// ─────────────────────────────────────────────────────────────────────────────
+#[test]
+pub fn cross_patch_drawer_thread_end_to_end() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    // Step 1: A | B | C top-level h-split (two vsplits).
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab.vertical_split(PaneId::Terminal(3), None, 1, None, None)
+        .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 30, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (90, 0, 30, 20));
+
+    // Step 2: Patch 1 — spawn D below B.
+    tab.new_pane(
+        PaneId::Terminal(4),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_2".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 30, 10));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(4)), (60, 10, 30, 10));
+
+    // Step 3: Patch 1 — spawn T left of B.
+    //
+    // Plan bullet 4 expected T at top level; in practice T inserts inside
+    // B's slot only because the column-strip filter requires full Dimension
+    // equality of `cols`, but B is Percent(25.0) while D is Fixed(30).
+    tab.new_pane(
+        PaneId::Terminal(5),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_2".to_string(),
+            direction: Direction::Left,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(
+        pane_geom(&tab, PaneId::Terminal(5)),
+        (60, 0, 15, 20),
+        "T spans the full screen height — top-level placement (plan bullet 4)"
+    );
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (75, 0, 15, 10));
+    assert_eq!(
+        pane_geom(&tab, PaneId::Terminal(4)),
+        (75, 10, 15, 10),
+        "D moved with the column-strip (cols matched by as_usize despite Fixed/Percent mix)"
+    );
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (90, 0, 30, 20));
+
+    // Step 4: Patch 3 — close T --absorb-to B. T's right aligning group
+    // is [B, D]; the whole column grows into T's freed columns.
+    tab.close_pane_absorbing_to(
+        PaneId::Terminal(5),
+        "terminal_2",
+        false,
+        None,
+        &mut None,
+    )
+    .expect("absorb-to B should succeed — whole [B, D] column grows together");
+
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(5)));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
+    assert_eq!(
+        pane_geom(&tab, PaneId::Terminal(2)),
+        (60, 0, 30, 10),
+        "B reclaimed editor's full top row (plan bullet 6 — B+D column expands)"
+    );
+    assert_eq!(
+        pane_geom(&tab, PaneId::Terminal(4)),
+        (60, 10, 30, 10),
+        "D (drawer) geometry intact through the whole flow — plan bullet 6"
+    );
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (90, 0, 30, 20));
 }
 
 #[test]

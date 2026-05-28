@@ -1315,9 +1315,14 @@ impl<'a> TiledPaneGrid<'a> {
             ),
         ];
 
+        // Accept any aligning group that CONTAINS `absorb_to` — when the
+        // group is multi-pane (e.g. an editor+drawer column), `grow_panes`
+        // grows each member and `PaneResizer` normalises positions, so the
+        // whole column shifts into the freed space together. The
+        // single-pane case still works (group of one ⇒ one pane grows).
         candidate_groups.into_iter().find_map(|(panes, direction)| {
             panes.and_then(|panes| {
-                if panes.as_slice() == [absorb_to] {
+                if panes.contains(&absorb_to) {
                     Some((panes, direction))
                 } else {
                     None
@@ -1405,6 +1410,7 @@ impl<'a> TiledPaneGrid<'a> {
         if id == absorb_to {
             return Err("closed pane and absorber pane must be different".to_string());
         }
+        let display_area = self.display_area;
         let (freed_width, freed_height, pane_to_close_is_stacked) = {
             let panes = self.panes.borrow_mut();
             let Some(pane_to_close) = panes.get(&id) else {
@@ -1417,8 +1423,24 @@ impl<'a> TiledPaneGrid<'a> {
                 ));
             }
             let freed_space = pane_to_close.position_and_size();
-            let freed_width = freed_space.cols.as_percent();
-            let freed_height = freed_space.rows.as_percent();
+            // Fall back to rendered cells / display area when the closing
+            // pane's `Dimension` is Fixed — Patch 1's column-strip path leaves
+            // newly-inserted panes with Fixed rows, and we still want
+            // absorb-to to work in those cases. `as_percent()` returns None
+            // for Fixed dims, so `.or_else` computes percent from cells.
+            let percent_from_cells = |cells: usize, total: usize| -> Option<f64> {
+                if total == 0 {
+                    None
+                } else {
+                    Some((cells as f64 / total as f64) * 100.0)
+                }
+            };
+            let freed_width = freed_space.cols.as_percent().or_else(|| {
+                percent_from_cells(freed_space.cols.as_usize(), display_area.cols)
+            });
+            let freed_height = freed_space.rows.as_percent().or_else(|| {
+                percent_from_cells(freed_space.rows.as_usize(), display_area.rows)
+            });
             let pane_to_close_is_stacked = pane_to_close.current_geom().is_stacked();
             (freed_width, freed_height, pane_to_close_is_stacked)
         };
@@ -1426,7 +1448,9 @@ impl<'a> TiledPaneGrid<'a> {
             return Err("close-pane --absorb-to does not support stacked panes".to_string());
         }
         let (Some(freed_width), Some(freed_height)) = (freed_width, freed_height) else {
-            return Err("close-pane --absorb-to does not support fixed-size panes".to_string());
+            return Err(
+                "close-pane --absorb-to could not compute freed dimensions".to_string(),
+            );
         };
         let Some((panes_to_grow, direction)) = self.find_panes_to_grow_absorbing_to(id, absorb_to)
         else {

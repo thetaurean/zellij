@@ -120,14 +120,20 @@ zellij action close-pane --pane-id terminal_5 --absorb-to terminal_3
 If two tiled panes in the same tab share a name, the call errors with an
 "ambiguous" message; pass the pane-id form to disambiguate.
 
-#### Absorber constraint
+#### Absorber semantics
 
-The absorber must be the **sole pane along the closing pane's aligning
-border** — no co-aligned neighbors on that side. Concretely: if the closer
-sits next to a vstack of two panes, neither pane alone can absorb the
-freed space; the call errors with "absorber pane … is not the complete
-adjacent aligning target." Use `move-pane` first to clear the side, or
-target a single-pane neighbor.
+The absorber must lie along the closing pane's aligning border. When that
+border is a single pane, that pane grows into the freed space. When the
+border is a multi-pane column-strip (e.g. an editor + drawer column),
+naming any pane in the strip absorbs the whole strip together — each
+member widens (or grows vertically for above/below cases) by the freed
+amount, and `PaneResizer` normalises positions so the column shifts as a
+unit. Drawer geometry is preserved.
+
+The error path stays clean: if the named absorber is on the wrong side of
+the closer (no aligning border between them), the call fails with
+"absorber pane … is not the complete adjacent aligning target" and the
+layout is left intact.
 
 #### Scope and known gaps
 
@@ -155,8 +161,8 @@ Cases that error cleanly (no panic, exit status 1, clear message):
 - Fullscreen is active (exit fullscreen first)
 - Absorber name doesn't resolve in the same tab as the closer
 - Absorber resolves to multiple panes (ambiguous name)
-- Absorber is not the complete adjacent aligning group (other panes
-  share that border with the closer)
+- Absorber is not on any of the closer's aligning borders (no
+  left/right/above/below group contains it)
 
 ## Versioning
 

@@ -804,15 +804,23 @@ impl TiledPanes {
                     .filter(|(id, _)| !self.panes_to_hide.contains(id))
                     .filter_map(|(id, pane)| {
                         let geom = pane.position_and_size();
+                        // Compare rendered cells (`as_usize()`) instead of full
+                        // `Dimension` equality. Up/Down inserts can leave a
+                        // sibling with `cols = Fixed(N)` while the target's
+                        // `cols = Percent(...)`, both rendering to the same
+                        // width; full-equality comparison would miss that
+                        // sibling and stop column-strip placement from working
+                        // for the gabi drawer↔thread flow.
                         let same_group = match direction {
                             Direction::Left | Direction::Right => {
-                                geom.x == target_geom.x && geom.cols == target_geom.cols
+                                geom.x == target_geom.x
+                                    && geom.cols.as_usize() == target_geom.cols.as_usize()
                             },
                             Direction::Up | Direction::Down => {
                                 geom.x == target_geom.x
-                                    && geom.cols == target_geom.cols
+                                    && geom.cols.as_usize() == target_geom.cols.as_usize()
                                     && geom.y == target_geom.y
-                                    && geom.rows == target_geom.rows
+                                    && geom.rows.as_usize() == target_geom.rows.as_usize()
                             },
                         };
                         same_group.then_some((*id, geom))

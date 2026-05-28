@@ -1176,9 +1176,10 @@ pub enum CliAction {
         /// Target a specific pane by ID (eg. terminal_1, plugin_2, or 3)
         #[clap(short, long, value_parser)]
         pane_id: Option<String>,
-        /// Direct the closed pane's freed space to a specific adjacent pane (by ID).
-        /// The absorber must be the sole pane along the closed pane's aligning border
-        /// (no co-aligned neighbors); otherwise the call errors without closing.
+        /// Direct the closed pane's freed space to a specific adjacent pane
+        /// (by name or id). When the absorber is part of a multi-pane
+        /// column-strip along the closing pane's aligning border (e.g. an
+        /// editor stacked over a drawer), the whole strip absorbs together.
         #[clap(long, value_parser)]
         absorb_to: Option<String>,
     },
