@@ -870,10 +870,36 @@ impl TiledPanes {
         } else {
             match direction {
                 Direction::Left | Direction::Right => {
+                    // Group may span multiple panes (e.g. editor + drawer
+                    // column-strip). Their combined visual height is a Fixed
+                    // cell span that the new pane (e.g. thread) needs to match
+                    // — Cassowary then treats it as a hard span across
+                    // multiple grid rows. Leave Fixed here.
+                    //
+                    // Latent: the new pane inherits `rows = Fixed`, which
+                    // makes `increase_pane_height` a silent no-op on it.
+                    // Symmetric to the Up/Down bug fixed below, but doesn't
+                    // bite any current consumer. See `TODO.md` ("Latent:
+                    // pane_group_split_near_pane_id Left/Right Fixed-rows
+                    // override leaves new pane non-resizable on the
+                    // perpendicular axis").
                     group_geom.rows = Dimension::fixed(max_y.saturating_sub(min_y));
                 },
                 Direction::Up | Direction::Down => {
-                    group_geom.cols = Dimension::fixed(max_x.saturating_sub(min_x));
+                    // For Up/Down direction the `same_group` filter above
+                    // requires the candidate's `(x, cols, y, rows)` to all
+                    // match the target's, so the group is always just the
+                    // target. `group_geom` was initialised from `target_geom`
+                    // (line above), so its `cols` already correctly mirrors
+                    // the target's Dimension representation. Overriding to
+                    // `Dimension::fixed(...)` here was a bug: the new pane
+                    // (e.g. drawer) would inherit `cols = Fixed(...)` and any
+                    // subsequent `increase_pane_width` would silently no-op
+                    // — so `close-pane --absorb-to editor` on a sibling pane
+                    // (e.g. thread) would fail to grow the editor/drawer
+                    // column-strip and Cassowary would redistribute the
+                    // freed space across other Percent panes (tree/right).
+                    // Preserve target's `cols` Dimension instead.
                 },
             }
         }

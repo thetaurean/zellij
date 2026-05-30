@@ -16894,6 +16894,291 @@ pub fn cross_patch_drawer_thread_end_to_end() {
     assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (90, 0, 30, 20));
 }
 
+// Regression tests for the zellij-fork "Cross-Patch Test Plan" plus the
+// extra ordering case the plan's smoke test ("open thread, open drawer,
+// close thread, reopen thread, close drawer, in every order") implicitly
+// exercises. Mirrors gabi's worktree-tab layout (top-bar + tree | editor |
+// right-stacked + status-bar) so we exercise `--target-pane editor
+// --direction Down/Left` and `close-pane --absorb-to editor` in the same
+// shape gabi runs against in production.
+//
+// Two orderings:
+//   * `_drawer_first_thread_second`: drawer is spawned before thread, so
+//     thread's later `--target-pane editor --direction Left` walks the
+//     column-strip [editor, drawer] and normalises both panes' `cols` to
+//     Percent on the way through `insert_pane_near_pane_id`. Order B.
+//   * `_thread_first_drawer_second`: thread is spawned first; drawer is
+//     spawned afterwards via `--target-pane editor --direction Down` with
+//     no column-strip to normalise (editor is the only group member).
+//     Order A. This is the path that surfaced the
+//     `pane_group_split_near_pane_id` `Dimension::fixed` override bug:
+//     drawer would inherit `cols = Fixed(...)` from `group_geom`, which
+//     made `increase_pane_width` (called by `close-pane --absorb-to`) a
+//     silent no-op on the drawer half of the absorber group, so
+//     PaneResizer's Cassowary solver redistributed the freed columns
+//     across tree/right instead.
+
+fn gabi_worktree_tab_layout() -> TiledPaneLayout {
+    let top_bar = TiledPaneLayout {
+        split_size: Some(SplitSize::Fixed(2)),
+        borderless: Some(true),
+        ..Default::default()
+    };
+    let tree = TiledPaneLayout {
+        split_size: Some(SplitSize::Percent(20)),
+        name: Some("tree".to_string()),
+        ..Default::default()
+    };
+    let editor = TiledPaneLayout {
+        split_size: Some(SplitSize::Percent(60)),
+        name: Some("editor".to_string()),
+        ..Default::default()
+    };
+    let right = TiledPaneLayout {
+        split_size: Some(SplitSize::Percent(20)),
+        name: Some("right".to_string()),
+        children_are_stacked: true,
+        children: vec![
+            TiledPaneLayout {
+                name: Some("files".to_string()),
+                focus: Some(true),
+                ..Default::default()
+            },
+            TiledPaneLayout {
+                name: Some("git".to_string()),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    let middle = TiledPaneLayout {
+        children_split_direction: SplitDirection::Vertical,
+        children: vec![tree, editor, right],
+        ..Default::default()
+    };
+    let status_bar = TiledPaneLayout {
+        split_size: Some(SplitSize::Fixed(2)),
+        borderless: Some(true),
+        ..Default::default()
+    };
+    TiledPaneLayout {
+        children_split_direction: SplitDirection::Horizontal,
+        children: vec![top_bar, middle, status_bar],
+        ..Default::default()
+    }
+}
+
+#[test]
+pub fn cross_patch_gabi_layout_drawer_first_thread_second_absorb_to_editor() {
+    let size = Size {
+        cols: 200,
+        rows: 50,
+    };
+    let mut tab = create_new_tab_with_layout(size, gabi_worktree_tab_layout());
+
+    let editor_pid = tab
+        .tiled_panes
+        .panes
+        .iter()
+        .find(|(_, p)| p.custom_title().as_deref() == Some("editor"))
+        .map(|(pid, _)| *pid)
+        .expect("editor pane should exist");
+
+    let drawer_pid = PaneId::Terminal(900);
+    tab.new_pane(
+        drawer_pid,
+        Some("drawer".to_string()),
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "editor".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .expect("drawer spawn should succeed");
+
+    let thread_pid = PaneId::Terminal(901);
+    tab.new_pane(
+        thread_pid,
+        Some("thread".to_string()),
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "editor".to_string(),
+            direction: Direction::Left,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .expect("thread spawn should succeed");
+
+    let editor_before = tab
+        .tiled_panes
+        .panes
+        .get(&editor_pid)
+        .unwrap()
+        .position_and_size();
+    let drawer_before = tab
+        .tiled_panes
+        .panes
+        .get(&drawer_pid)
+        .unwrap()
+        .position_and_size();
+    let thread_before = tab
+        .tiled_panes
+        .panes
+        .get(&thread_pid)
+        .unwrap()
+        .position_and_size();
+
+    tab.close_pane_absorbing_to(thread_pid, "editor", false, None, &mut None)
+        .expect("absorb-to editor should succeed");
+
+    let editor_after = tab
+        .tiled_panes
+        .panes
+        .get(&editor_pid)
+        .unwrap()
+        .position_and_size();
+    let drawer_after = tab
+        .tiled_panes
+        .panes
+        .get(&drawer_pid)
+        .unwrap()
+        .position_and_size();
+
+    assert_eq!(editor_after.x, thread_before.x);
+    assert_eq!(drawer_after.x, thread_before.x);
+    assert_eq!(
+        editor_after.cols.as_usize(),
+        editor_before.cols.as_usize() + thread_before.cols.as_usize(),
+        "editor.cols should grow by thread.cols (drawer-first/thread-second order)"
+    );
+    assert_eq!(
+        drawer_after.cols.as_usize(),
+        drawer_before.cols.as_usize() + thread_before.cols.as_usize(),
+        "drawer.cols should grow by thread.cols (drawer-first/thread-second order)"
+    );
+}
+
+#[test]
+pub fn cross_patch_gabi_layout_thread_first_drawer_second_absorb_to_editor() {
+    let size = Size {
+        cols: 200,
+        rows: 50,
+    };
+    let mut tab = create_new_tab_with_layout(size, gabi_worktree_tab_layout());
+
+    let editor_pid = tab
+        .tiled_panes
+        .panes
+        .iter()
+        .find(|(_, p)| p.custom_title().as_deref() == Some("editor"))
+        .map(|(pid, _)| *pid)
+        .expect("editor pane should exist");
+
+    let thread_pid = PaneId::Terminal(901);
+    tab.new_pane(
+        thread_pid,
+        Some("thread".to_string()),
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "editor".to_string(),
+            direction: Direction::Left,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .expect("thread spawn should succeed");
+
+    let drawer_pid = PaneId::Terminal(900);
+    tab.new_pane(
+        drawer_pid,
+        Some("drawer".to_string()),
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "editor".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+        },
+        Some(1),
+        None,
+    )
+    .expect("drawer spawn should succeed");
+
+    // Sanity check the regression-causing condition: drawer was spawned
+    // into editor's column with no other column-strip member, so without
+    // the fix in `pane_group_split_near_pane_id`, drawer.cols would land
+    // as `Dimension::Fixed`. Assert it's Percent so a future regression
+    // surfaces here too, not just in the close-pane behaviour below.
+    let drawer_geom = tab
+        .tiled_panes
+        .panes
+        .get(&drawer_pid)
+        .unwrap()
+        .position_and_size();
+    assert!(
+        drawer_geom.cols.as_percent().is_some(),
+        "drawer.cols must be Percent after Up/Down spawn; got {:?}",
+        drawer_geom.cols
+    );
+
+    let editor_before = tab
+        .tiled_panes
+        .panes
+        .get(&editor_pid)
+        .unwrap()
+        .position_and_size();
+    let drawer_before = drawer_geom;
+    let thread_before = tab
+        .tiled_panes
+        .panes
+        .get(&thread_pid)
+        .unwrap()
+        .position_and_size();
+
+    tab.close_pane_absorbing_to(thread_pid, "editor", false, None, &mut None)
+        .expect("absorb-to editor should succeed");
+
+    let editor_after = tab
+        .tiled_panes
+        .panes
+        .get(&editor_pid)
+        .unwrap()
+        .position_and_size();
+    let drawer_after = tab
+        .tiled_panes
+        .panes
+        .get(&drawer_pid)
+        .unwrap()
+        .position_and_size();
+
+    assert_eq!(editor_after.x, thread_before.x);
+    assert_eq!(drawer_after.x, thread_before.x);
+    assert_eq!(
+        editor_after.cols.as_usize(),
+        editor_before.cols.as_usize() + thread_before.cols.as_usize(),
+        "editor.cols should grow by thread.cols (thread-first/drawer-second order)"
+    );
+    assert_eq!(
+        drawer_after.cols.as_usize(),
+        drawer_before.cols.as_usize() + thread_before.cols.as_usize(),
+        "drawer.cols should grow by thread.cols (thread-first/drawer-second order) — \
+         silently fails if drawer.cols was left Fixed by pane_group_split_near_pane_id"
+    );
+}
+
 #[test]
 pub fn resize_by_pane_id() {
     let size = Size {
