@@ -22,7 +22,7 @@ use zellij_utils::{
     errors::prelude::*,
     input::{
         command::RunCommand,
-        layout::{Run, RunPluginOrAlias, SplitDirection},
+        layout::{Run, RunPluginOrAlias, SplitDirection, SplitSize},
     },
     pane_size::{Dimension, Offset, PaneGeom, Size, SizeInPixels, Viewport},
 };
@@ -51,6 +51,33 @@ fn pane_content_offset(position_and_size: &PaneGeom, viewport: &Viewport) -> (us
         0
     };
     (columns_offset, rows_offset)
+}
+
+/// Resolve a requested `SplitSize` against `total` cells available along the
+/// split axis. Returns `(new_pane_cells, other_side_cells, new_pane_dimension)`.
+///
+/// - `new_pane_cells` honors the request, clamped to `[1, total - 1]` so both
+///   sides keep at least one cell. This matches layout-declared `size=N` panes,
+///   which are NOT floored at `MIN_TERMINAL_*` (e.g. a 2-row status strip is
+///   legal); the `MIN_TERMINAL_* * 2` gate elsewhere only decides whether a
+///   split happens at all, not how the room is divided.
+/// - `new_pane_dimension` is `Fixed`/`Percent` so the pane sticks through
+///   relayout instead of being rebalanced like a plain percent split.
+fn sized_split(size: SplitSize, total: usize, _new_is_lead: bool) -> (usize, usize, Dimension) {
+    let new_cells = size
+        .to_fixed(total)
+        .max(1)
+        .min(total.saturating_sub(1).max(1));
+    let other_cells = total.saturating_sub(new_cells);
+    let dimension = match size {
+        SplitSize::Fixed(_) => Dimension::fixed(new_cells),
+        SplitSize::Percent(p) => {
+            let mut d = Dimension::percent(p as f64);
+            d.set_inner(new_cells);
+            d
+        },
+    };
+    (new_cells, other_cells, dimension)
 }
 
 pub struct TiledPanes {
@@ -3226,4 +3253,44 @@ pub fn pane_geom_is_inside_viewport(viewport: &Viewport, geom: &PaneGeom) -> boo
         && geom.y + geom.rows.as_usize() <= viewport.y + viewport.rows
         && geom.x >= viewport.x
         && geom.x + geom.cols.as_usize() <= viewport.x + viewport.cols
+}
+
+#[cfg(test)]
+mod fixed_size_split_tests {
+    use super::sized_split;
+    use zellij_utils::input::layout::SplitSize;
+
+    // (new_cells, other_cells)
+    #[test]
+    fn fixed_smaller_than_total_is_exact() {
+        let (new, other, _dim) = sized_split(SplitSize::Fixed(2), 20, /*new_is_lead*/ false);
+        assert_eq!((new, other), (2, 18));
+    }
+
+    #[test]
+    fn fixed_clamps_to_leave_one_cell_for_other_side() {
+        let (new, other, _dim) = sized_split(SplitSize::Fixed(100), 20, false);
+        assert_eq!((new, other), (19, 1));
+    }
+
+    #[test]
+    fn fixed_clamps_up_to_at_least_one_cell() {
+        let (new, other, _dim) = sized_split(SplitSize::Fixed(0), 20, false);
+        assert_eq!((new, other), (1, 19));
+    }
+
+    #[test]
+    fn percent_resolves_against_total() {
+        let (new, other, dim) = sized_split(SplitSize::Percent(20), 20, false);
+        assert_eq!((new, other), (4, 16));
+        assert_eq!(dim.as_percent(), Some(20.0));
+        assert_eq!(dim.as_usize(), 4);
+    }
+
+    #[test]
+    fn fixed_dimension_is_fixed() {
+        let (_new, _other, dim) = sized_split(SplitSize::Fixed(3), 20, false);
+        assert_eq!(dim.as_percent(), None);
+        assert_eq!(dim.as_usize(), 3);
+    }
 }
