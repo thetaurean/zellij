@@ -80,3 +80,15 @@ shape but invert axes — thread is the absorber, not the absorbee.
 consumer) introduces a "close X absorb-to thread" pattern, or upstream
 review surfaces it. Until then, the Up/Down fix's comment block in
 `pane_group_split_near_pane_id` references this TODO.
+
+---
+
+# Zellij fork TODO: right-click plugin dispatch
+
+The zellij-gabi fork ships from `thetaurean/tap`. The fork's source lives at `~/dev/zellij`.
+
+`zellij-server/src/panes/plugin_pane.rs:719` defines `handle_right_click` but it is never called by the server. As a result, `Mouse::RightClick` events never reach plugins: `gabi-files`, `gabi-tree`, and any future `gabi-overlay-menu` consumer cannot offer right-click as a `⋮`-equivalent trigger.
+
+When wired, the `gabi-overlay-menu` crate is the natural integration point: it already owns `Trigger` and `Menu`, and a right-click event would route through the same `hit_test` path that left-clicks use today.
+
+This note is duplicated as a TODO in the fork repo so the work is discoverable from either side.
