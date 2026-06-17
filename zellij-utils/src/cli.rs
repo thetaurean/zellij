@@ -982,11 +982,13 @@ pub enum CliAction {
         /// The y coordinates if the pane is floating as a bare integer (eg. 1) or percent (eg. 10%)
         #[clap(short, long, requires("floating"))]
         y: Option<String>,
-        /// The width if the pane is floating as a bare integer (eg. 1) or percent (eg. 10%)
-        #[clap(long, requires("floating"))]
+        /// Pane width: floating panes, or tiled panes with --direction
+        /// left/right (eg. bare integer `5` or percent `10%`)
+        #[clap(long)]
         width: Option<String>,
-        /// The height if the pane is floating as a bare integer (eg. 1) or percent (eg. 10%)
-        #[clap(long, requires("floating"))]
+        /// Pane height: floating panes, or tiled panes with --direction
+        /// down/up (eg. bare integer `2` or percent `10%`)
+        #[clap(long)]
         height: Option<String>,
         /// Whether to pin a floating pane so that it is always on top
         #[clap(long, requires("floating"))]

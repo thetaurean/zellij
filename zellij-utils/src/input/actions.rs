@@ -2,8 +2,9 @@
 
 pub use super::command::{OpenFilePayload, RunCommandAction};
 use super::layout::{
-    FloatingPaneLayout, Layout, PluginAlias, RunPlugin, RunPluginLocation, RunPluginOrAlias,
-    SwapFloatingLayout, SwapTiledLayout, TabLayoutInfo, TiledPaneLayout,
+    FloatingPaneLayout, Layout, PercentOrFixed, PluginAlias, RunPlugin, RunPluginLocation,
+    RunPluginOrAlias, SplitSize, SwapFloatingLayout, SwapTiledLayout, TabLayoutInfo,
+    TiledPaneLayout,
 };
 use crate::cli::CliAction;
 use crate::data::{
@@ -1133,7 +1134,13 @@ impl Action {
                             borderless,
                         }
                     } else {
-                        tiled_placement_from_cli(target_pane, direction, borderless)?
+                        tiled_placement_from_cli(
+                            target_pane,
+                            direction,
+                            borderless,
+                            width,
+                            height,
+                        )?
                     };
 
                     Ok(vec![Action::NewBlockingPane {
@@ -1242,8 +1249,13 @@ impl Action {
                             tab_id,
                         }])
                     } else {
-                        let placement =
-                            tiled_placement_from_cli(target_pane, direction, borderless)?;
+                        let placement = tiled_placement_from_cli(
+                            target_pane,
+                            direction,
+                            borderless,
+                            width,
+                            height,
+                        )?;
                         Ok(vec![Action::NewTiledPane {
                             placement,
                             command: Some(run_command_action),
@@ -1280,8 +1292,13 @@ impl Action {
                             tab_id,
                         }])
                     } else {
-                        let placement =
-                            tiled_placement_from_cli(target_pane, direction, borderless)?;
+                        let placement = tiled_placement_from_cli(
+                            target_pane,
+                            direction,
+                            borderless,
+                            width,
+                            height,
+                        )?;
                         Ok(vec![Action::NewTiledPane {
                             placement,
                             command: None,
@@ -2320,7 +2337,10 @@ fn tiled_placement_from_cli(
     target_pane: Option<String>,
     direction: Option<Direction>,
     borderless: Option<bool>,
+    width: Option<String>,
+    height: Option<String>,
 ) -> Result<NewPanePlacement, String> {
+    let size = tiled_size_from_cli(direction, width, height)?;
     match target_pane {
         Some(target_pane) => {
             let direction =
@@ -2329,14 +2349,57 @@ fn tiled_placement_from_cli(
                 target_pane,
                 direction,
                 borderless,
-                size: None,
+                size,
             })
         },
         None => Ok(NewPanePlacement::Tiled {
             direction,
             borderless,
-            size: None,
+            size,
         }),
+    }
+}
+
+/// Resolve `--width`/`--height` into a single `SplitSize` along the tiled
+/// split axis:
+///   - down/up   -> `--height` sets rows; `--width` is an error
+///   - left/right -> `--width` sets cols; `--height` is an error
+/// A size requires a `--direction` (the axis); without one it's an error.
+/// No width/height -> `Ok(None)` (default 50% split, unchanged behavior).
+fn tiled_size_from_cli(
+    direction: Option<Direction>,
+    width: Option<String>,
+    height: Option<String>,
+) -> Result<Option<SplitSize>, String> {
+    if width.is_none() && height.is_none() {
+        return Ok(None);
+    }
+    let direction = direction.ok_or_else(|| {
+        "--width/--height on a tiled pane require --direction (or pass --floating)".to_string()
+    })?;
+    let parse = |raw: String, flag: &str| -> Result<SplitSize, String> {
+        PercentOrFixed::from_str(&raw)
+            .map(SplitSize::from)
+            .map_err(|e| format!("invalid {flag} value '{raw}': {e}"))
+    };
+    match direction {
+        Direction::Up | Direction::Down => {
+            if width.is_some() {
+                return Err(
+                    "--width does not apply to a down/up tiled split; use --height".to_string(),
+                );
+            }
+            Ok(Some(parse(height.unwrap(), "--height")?))
+        },
+        Direction::Left | Direction::Right => {
+            if height.is_some() {
+                return Err(
+                    "--height does not apply to a left/right tiled split; use --width"
+                        .to_string(),
+                );
+            }
+            Ok(Some(parse(width.unwrap(), "--width")?))
+        },
     }
 }
 
@@ -2354,7 +2417,48 @@ mod tests {
     use super::*;
     use crate::data::BareKey;
     use crate::data::KeyModifier;
+    use crate::input::layout::SplitSize;
     use std::path::PathBuf;
+
+    #[derive(Default)]
+    struct NewPaneFixture {
+        direction: Option<Direction>,
+        target_pane: Option<String>,
+        width: Option<String>,
+        height: Option<String>,
+    }
+
+    fn new_pane_cli_fixture(f: NewPaneFixture) -> CliAction {
+        CliAction::NewPane {
+            direction: f.direction,
+            target_pane: f.target_pane,
+            command: vec![],
+            plugin: None,
+            cwd: None,
+            floating: false,
+            in_place: false,
+            close_replaced_pane: false,
+            name: None,
+            close_on_exit: false,
+            start_suspended: false,
+            configuration: None,
+            skip_plugin_cache: false,
+            x: None,
+            y: None,
+            width: f.width,
+            height: f.height,
+            pinned: None,
+            stacked: false,
+            blocking: false,
+            block_until_exit_success: false,
+            block_until_exit_failure: false,
+            block_until_exit: false,
+            unblock_condition: None,
+            near_current_pane: false,
+            borderless: None,
+            tab_id: None,
+        }
+    }
 
     #[test]
     fn test_send_keys_single_key() {
@@ -3918,6 +4022,75 @@ mod tests {
             },
             _ => panic!("Expected NewTiledPane action"),
         }
+    }
+
+    #[test]
+    fn test_new_pane_tiled_near_target_with_fixed_height() {
+        let cli_action = new_pane_cli_fixture(NewPaneFixture {
+            direction: Some(Direction::Down),
+            target_pane: Some("editor".to_string()),
+            height: Some("2".to_string()),
+            ..Default::default()
+        });
+        let actions =
+            Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None).unwrap();
+        match &actions[0] {
+            Action::NewTiledPane { placement, .. } => assert_eq!(
+                placement,
+                &NewPanePlacement::TiledNearTarget {
+                    target_pane: "editor".to_string(),
+                    direction: Direction::Down,
+                    borderless: None,
+                    size: Some(SplitSize::Fixed(2)),
+                }
+            ),
+            _ => panic!("expected NewTiledPane"),
+        }
+    }
+
+    #[test]
+    fn test_new_pane_tiled_with_percent_height() {
+        let cli_action = new_pane_cli_fixture(NewPaneFixture {
+            direction: Some(Direction::Down),
+            height: Some("20%".to_string()),
+            ..Default::default()
+        });
+        let actions =
+            Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None).unwrap();
+        match &actions[0] {
+            Action::NewTiledPane { placement, .. } => assert_eq!(
+                placement,
+                &NewPanePlacement::Tiled {
+                    direction: Some(Direction::Down),
+                    borderless: None,
+                    size: Some(SplitSize::Percent(20)),
+                }
+            ),
+            _ => panic!("expected NewTiledPane"),
+        }
+    }
+
+    #[test]
+    fn test_new_pane_width_on_vertical_split_is_rejected() {
+        let cli_action = new_pane_cli_fixture(NewPaneFixture {
+            direction: Some(Direction::Down),
+            width: Some("2".to_string()),
+            ..Default::default()
+        });
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("--width"));
+    }
+
+    #[test]
+    fn test_new_pane_size_without_direction_is_rejected() {
+        let cli_action = new_pane_cli_fixture(NewPaneFixture {
+            height: Some("2".to_string()),
+            ..Default::default()
+        });
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("--direction"));
     }
 
     #[test]
