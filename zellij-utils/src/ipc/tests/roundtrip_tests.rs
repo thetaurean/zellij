@@ -1436,6 +1436,39 @@ fn test_client_messages() {
     });
     test_client_roundtrip!(ClientToServerMsg::Action {
         action: Action::NewTiledPane {
+            command: None,
+            placement: NewPanePlacement::TiledNearTarget {
+                target_pane: "editor".to_owned(),
+                direction: Direction::Down,
+                borderless: Some(true),
+                size: Some(SplitSize::Fixed(2)),
+            },
+            pane_name: None,
+            near_current_pane: false,
+            tab_id: None,
+        },
+        terminal_id: Some(1),
+        client_id: Some(100),
+        is_cli_client: true,
+    });
+    test_client_roundtrip!(ClientToServerMsg::Action {
+        action: Action::NewTiledPane {
+            command: None,
+            placement: NewPanePlacement::Tiled {
+                direction: Some(Direction::Down),
+                borderless: None,
+                size: Some(SplitSize::Percent(20)),
+            },
+            pane_name: None,
+            near_current_pane: false,
+            tab_id: None,
+        },
+        terminal_id: Some(1),
+        client_id: Some(100),
+        is_cli_client: true,
+    });
+    test_client_roundtrip!(ClientToServerMsg::Action {
+        action: Action::NewTiledPane {
             command: Some(RunCommandAction {
                 command: PathBuf::from("/path/to/command"),
                 args: vec!["arg1".to_owned(), "arg2".to_owned()],

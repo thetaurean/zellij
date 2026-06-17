@@ -3504,26 +3504,29 @@ impl From<crate::data::NewPanePlacement>
             },
             crate::data::NewPanePlacement::Tiled {
                 direction,
-                borderless: Some(b),
-                size: _,
-            } => PlacementType::TiledWithOptions(TiledPlacement {
-                direction: direction.map(direction_to_proto_i32),
-                borderless: Some(b),
-            }),
-            crate::data::NewPanePlacement::Tiled {
-                direction,
-                borderless: None,
-                size: _,
-            } => PlacementType::Tiled(direction.map(direction_to_proto_i32).unwrap_or(0)),
+                borderless,
+                size,
+            } => {
+                if borderless.is_some() || size.is_some() {
+                    PlacementType::TiledWithOptions(TiledPlacement {
+                        direction: direction.map(direction_to_proto_i32),
+                        borderless,
+                        size: size.map(Into::into),
+                    })
+                } else {
+                    PlacementType::Tiled(direction.map(direction_to_proto_i32).unwrap_or(0))
+                }
+            },
             crate::data::NewPanePlacement::TiledNearTarget {
                 target_pane,
                 direction,
                 borderless,
-                size: _,
+                size,
             } => PlacementType::TiledNearTarget(TiledNearTargetPlacement {
                 target_pane,
                 direction: direction_to_proto_i32(direction),
                 borderless,
+                size: size.map(Into::into),
             }),
             crate::data::NewPanePlacement::Floating(coords) => {
                 PlacementType::Floating(coords.map(|c| c.into()).unwrap_or_default())
@@ -3585,7 +3588,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::NewPanePlace
                 Ok(crate::data::NewPanePlacement::Tiled {
                     direction,
                     borderless: opts.borderless,
-                    size: None,
+                    size: opts.size.map(proto_split_size_to_layout).transpose()?,
                 })
             },
             PlacementType::StackedWithOptions(opts) => {
@@ -3603,7 +3606,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::NewPanePlace
                     target_pane: opts.target_pane,
                     direction: proto_i32_to_direction(opts.direction)?,
                     borderless: opts.borderless,
-                    size: None,
+                    size: opts.size.map(proto_split_size_to_layout).transpose()?,
                 })
             },
             // Legacy fields (without borderless support)
@@ -3766,6 +3769,19 @@ impl From<crate::input::layout::SplitSize>
                 size_type: Some(SizeType::Fixed(f as u32)),
             },
         }
+    }
+}
+
+fn proto_split_size_to_layout(
+    size: crate::client_server_contract::client_server_contract::SplitSize,
+) -> Result<crate::input::layout::SplitSize> {
+    use crate::client_server_contract::client_server_contract::split_size::SizeType;
+    match size
+        .size_type
+        .ok_or_else(|| anyhow!("SplitSize missing size_type"))?
+    {
+        SizeType::Percent(p) => Ok(crate::input::layout::SplitSize::Percent(p as usize)),
+        SizeType::Fixed(f) => Ok(crate::input::layout::SplitSize::Fixed(f as usize)),
     }
 }
 

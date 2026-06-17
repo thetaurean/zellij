@@ -1423,6 +1423,8 @@ pub struct TiledPlacement {
     pub direction: ::core::option::Option<i32>,
     #[prost(bool, optional, tag="2")]
     pub borderless: ::core::option::Option<bool>,
+    #[prost(message, optional, tag="3")]
+    pub size: ::core::option::Option<SplitSize>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1433,6 +1435,8 @@ pub struct TiledNearTargetPlacement {
     pub direction: i32,
     #[prost(bool, optional, tag="3")]
     pub borderless: ::core::option::Option<bool>,
+    #[prost(message, optional, tag="4")]
+    pub size: ::core::option::Option<SplitSize>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

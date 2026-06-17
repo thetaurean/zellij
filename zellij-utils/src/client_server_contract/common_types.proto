@@ -847,12 +847,14 @@ message NoPreferencePlacement {
 message TiledPlacement {
   optional Direction direction = 1;
   optional bool borderless = 2;
+  optional SplitSize size = 3;
 }
 
 message TiledNearTargetPlacement {
   string target_pane = 1;
   Direction direction = 2;
   optional bool borderless = 3;
+  optional SplitSize size = 4;
 }
 
 message StackedPlacement {
