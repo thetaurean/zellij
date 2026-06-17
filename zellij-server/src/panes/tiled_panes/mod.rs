@@ -61,8 +61,10 @@ fn pane_content_offset(position_and_size: &PaneGeom, viewport: &Viewport) -> (us
 ///   which are NOT floored at `MIN_TERMINAL_*` (e.g. a 2-row status strip is
 ///   legal); the `MIN_TERMINAL_* * 2` gate elsewhere only decides whether a
 ///   split happens at all, not how the room is divided.
-/// - `new_pane_dimension` is `Fixed`/`Percent` so the pane sticks through
-///   relayout instead of being rebalanced like a plain percent split.
+/// - `new_pane_dimension` is `Fixed` (rigid: keeps its exact cell count through
+///   relayout) or `Percent` (stays flexible and is rebalanced by Cassowary just
+///   like a layout-declared `size=N%` pane — it holds its proportion, not its
+///   cells). Only the `Fixed` path is truly sticky.
 fn sized_split(size: SplitSize, total: usize, _new_is_lead: bool) -> (usize, usize, Dimension) {
     let new_cells = size
         .to_fixed(total)

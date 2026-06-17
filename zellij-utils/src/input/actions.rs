@@ -2379,7 +2379,7 @@ fn unsupported_non_floating_size(
 ) -> Result<(), String> {
     if width.is_some() || height.is_some() {
         Err(
-            "--width/--height are only supported for floating panes or tiled panes with --direction"
+            "--width/--height are not supported for in-place or stacked panes; use --floating, or a tiled pane with --direction"
                 .to_string(),
         )
     } else {
