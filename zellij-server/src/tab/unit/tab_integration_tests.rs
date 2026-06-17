@@ -12374,6 +12374,7 @@ fn in_place_pane_with_close_replaced_pane_false_restores_original() {
         NewPanePlacement::Tiled {
             direction: None,
             borderless: None,
+            size: None,
         },
         Some(client_id),
         None,
@@ -12437,6 +12438,7 @@ fn in_place_pane_with_close_replaced_pane_true_closes_original() {
         NewPanePlacement::Tiled {
             direction: None,
             borderless: None,
+            size: None,
         },
         Some(client_id),
         None,

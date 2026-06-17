@@ -1407,6 +1407,7 @@ fn test_client_messages() {
             placement: NewPanePlacement::Tiled {
                 direction: None,
                 borderless: None,
+                size: None,
             },
             pane_name: None,
             near_current_pane: false,
@@ -1423,6 +1424,7 @@ fn test_client_messages() {
                 target_pane: "editor-main".to_owned(),
                 direction: Direction::Down,
                 borderless: Some(true),
+                size: None,
             },
             pane_name: None,
             near_current_pane: false,
@@ -1451,6 +1453,7 @@ fn test_client_messages() {
             placement: NewPanePlacement::Tiled {
                 direction: Some(Direction::Right),
                 borderless: Some(true),
+                size: None,
             },
             pane_name: Some("my_pane_name".to_owned()),
             near_current_pane: false,
@@ -2620,6 +2623,7 @@ fn test_client_messages() {
             placement: NewPanePlacement::Tiled {
                 direction: Some(Direction::Right),
                 borderless: None,
+                size: None,
             },
             command: None,
             pane_name: None,
@@ -2657,7 +2661,8 @@ fn test_client_messages() {
         action: Action::NewBlockingPane {
             placement: NewPanePlacement::Tiled {
                 direction: None,
-                borderless: None
+                borderless: None,
+                size: None,
             },
             pane_name: None,
             command: None,

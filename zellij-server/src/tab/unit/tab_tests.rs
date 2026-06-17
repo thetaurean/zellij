@@ -460,6 +460,7 @@ fn new_pane_right_of_named_top_level_target_spans_target_slot() {
             target_pane: "A".to_string(),
             direction: Direction::Right,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -493,6 +494,7 @@ fn new_pane_right_of_target_inside_vertical_group_spans_whole_group() {
             target_pane: "terminal_1".to_string(),
             direction: Direction::Right,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -522,6 +524,7 @@ fn new_pane_down_of_leaf_target_creates_vertical_pair() {
             target_pane: "terminal_1".to_string(),
             direction: Direction::Down,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -555,6 +558,7 @@ fn new_pane_down_of_leaf_target_beside_sibling_splits_only_target() {
             target_pane: "terminal_1".to_string(),
             direction: Direction::Down,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -589,6 +593,7 @@ fn new_pane_down_of_leaf_target_above_sibling_splits_only_target() {
             target_pane: "terminal_1".to_string(),
             direction: Direction::Down,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -623,6 +628,7 @@ fn new_pane_up_of_leaf_target_below_sibling_splits_only_target() {
             target_pane: "terminal_2".to_string(),
             direction: Direction::Up,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -656,6 +662,7 @@ fn new_pane_with_missing_target_does_not_close_existing_panes_at_max_panes() {
             target_pane: "missing".to_string(),
             direction: Direction::Right,
             borderless: None,
+            size: None,
         },
         Some(1),
         Some(completion),
@@ -696,6 +703,7 @@ fn new_pane_with_too_small_target_does_not_close_existing_panes_at_max_panes() {
             target_pane: "terminal_1".to_string(),
             direction: Direction::Down,
             borderless: None,
+            size: None,
         },
         Some(1),
         Some(completion),
@@ -740,6 +748,7 @@ fn new_pane_with_target_at_max_panes_keeps_target_and_closes_other_pane() {
             target_pane: "terminal_2".to_string(),
             direction: Direction::Down,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -772,6 +781,7 @@ fn new_pane_with_target_at_impossible_max_panes_reports_error() {
             target_pane: "terminal_1".to_string(),
             direction: Direction::Right,
             borderless: None,
+            size: None,
         },
         Some(1),
         Some(completion),
@@ -813,6 +823,7 @@ fn new_pane_errors_when_target_name_matches_multiple_panes() {
             target_pane: "shared".to_string(),
             direction: Direction::Right,
             borderless: None,
+            size: None,
         },
         Some(1),
         Some(completion),
@@ -862,6 +873,7 @@ fn new_pane_disambiguates_duplicate_names_via_pane_id_string() {
             target_pane: "terminal_2".to_string(),
             direction: Direction::Right,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -900,6 +912,7 @@ fn new_pane_errors_when_plugin_target_id_string_does_not_match_any_pane() {
             target_pane: "plugin_5".to_string(),
             direction: Direction::Right,
             borderless: None,
+            size: None,
         },
         Some(1),
         Some(completion),
@@ -949,6 +962,7 @@ fn new_pane_down_of_stacked_target_splits_stack_as_unit() {
             target_pane: "terminal_1".to_string(),
             direction: Direction::Down,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -16373,14 +16387,8 @@ pub fn close_pane_absorbing_to_adjacent_pane_grows_absorber() {
     assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
     assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 20));
 
-    tab.close_pane_absorbing_to(
-        PaneId::Terminal(1),
-        "terminal_2",
-        false,
-        None,
-        &mut None,
-    )
-    .unwrap();
+    tab.close_pane_absorbing_to(PaneId::Terminal(1), "terminal_2", false, None, &mut None)
+        .unwrap();
 
     assert!(!tab.has_pane_with_pid(&PaneId::Terminal(1)));
     assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 0, 120, 20));
@@ -16417,13 +16425,8 @@ pub fn close_pane_absorbing_to_same_pane_returns_error_without_closing() {
     };
     let mut tab = create_new_tab(size, true);
 
-    let result = tab.close_pane_absorbing_to(
-        PaneId::Terminal(1),
-        "terminal_1",
-        false,
-        None,
-        &mut None,
-    );
+    let result =
+        tab.close_pane_absorbing_to(PaneId::Terminal(1), "terminal_1", false, None, &mut None);
 
     assert!(result.is_err(), "expected same-pane absorb to error");
     assert!(tab.has_pane_with_pid(&PaneId::Terminal(1)));
@@ -16446,13 +16449,8 @@ pub fn close_pane_absorbing_to_non_adjacent_pane_returns_error_without_closing()
     assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 10));
     assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 10, 60, 10));
 
-    let result = tab.close_pane_absorbing_to(
-        PaneId::Terminal(2),
-        "terminal_1",
-        false,
-        None,
-        &mut None,
-    );
+    let result =
+        tab.close_pane_absorbing_to(PaneId::Terminal(2), "terminal_1", false, None, &mut None);
 
     assert!(result.is_err(), "expected non-adjacent absorb to error");
     assert!(tab.has_pane_with_pid(&PaneId::Terminal(2)));
@@ -16481,14 +16479,8 @@ pub fn close_pane_absorbing_to_grouped_adjacent_pane_grows_whole_group() {
     assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (60, 0, 60, 10));
     assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (60, 10, 60, 10));
 
-    tab.close_pane_absorbing_to(
-        PaneId::Terminal(1),
-        "terminal_2",
-        false,
-        None,
-        &mut None,
-    )
-    .expect("grouped absorber should succeed — whole column-strip grows together");
+    tab.close_pane_absorbing_to(PaneId::Terminal(1), "terminal_2", false, None, &mut None)
+        .expect("grouped absorber should succeed — whole column-strip grows together");
 
     assert!(!tab.has_pane_with_pid(&PaneId::Terminal(1)));
     assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 0, 120, 10));
@@ -16514,13 +16506,8 @@ pub fn close_pane_absorbing_to_rejects_fullscreen_without_mutating_layout() {
     let pane_2_geom = pane_geom(&tab, PaneId::Terminal(2));
     let pane_3_geom = pane_geom(&tab, PaneId::Terminal(3));
 
-    let result = tab.close_pane_absorbing_to(
-        PaneId::Terminal(1),
-        "terminal_2",
-        false,
-        None,
-        &mut None,
-    );
+    let result =
+        tab.close_pane_absorbing_to(PaneId::Terminal(1), "terminal_2", false, None, &mut None);
 
     assert!(result.is_err(), "expected fullscreen absorb to error");
     let msg = result.unwrap_err();
@@ -16553,14 +16540,8 @@ pub fn close_pane_absorbing_to_vertical_neighbor_grows_absorber() {
     assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 10));
     assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 10, 120, 10));
 
-    tab.close_pane_absorbing_to(
-        PaneId::Terminal(1),
-        "terminal_2",
-        false,
-        None,
-        &mut None,
-    )
-    .unwrap();
+    tab.close_pane_absorbing_to(PaneId::Terminal(1), "terminal_2", false, None, &mut None)
+        .unwrap();
 
     assert!(!tab.has_pane_with_pid(&PaneId::Terminal(1)));
     assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 0, 120, 20));
@@ -16578,13 +16559,8 @@ pub fn close_pane_absorbing_to_rejects_floating_closer() {
     tab.new_floating_pane(PaneId::Terminal(2), None, None, false, true, None, None)
         .unwrap();
 
-    let result = tab.close_pane_absorbing_to(
-        PaneId::Terminal(2),
-        "terminal_1",
-        false,
-        None,
-        &mut None,
-    );
+    let result =
+        tab.close_pane_absorbing_to(PaneId::Terminal(2), "terminal_1", false, None, &mut None);
 
     assert!(result.is_err(), "expected Err when closer is floating");
     let msg = result.unwrap_err();
@@ -16610,13 +16586,8 @@ pub fn close_pane_absorbing_to_rejects_floating_absorber() {
     tab.new_floating_pane(PaneId::Terminal(3), None, None, false, true, None, None)
         .unwrap();
 
-    let result = tab.close_pane_absorbing_to(
-        PaneId::Terminal(1),
-        "terminal_3",
-        false,
-        None,
-        &mut None,
-    );
+    let result =
+        tab.close_pane_absorbing_to(PaneId::Terminal(1), "terminal_3", false, None, &mut None);
 
     assert!(result.is_err(), "expected Err when absorber is floating");
     let msg = result.unwrap_err();
@@ -16654,13 +16625,8 @@ pub fn close_pane_absorbing_to_rejects_stacked_closer() {
     )
     .unwrap();
 
-    let result = tab.close_pane_absorbing_to(
-        PaneId::Terminal(1),
-        "terminal_2",
-        false,
-        None,
-        &mut None,
-    );
+    let result =
+        tab.close_pane_absorbing_to(PaneId::Terminal(1), "terminal_2", false, None, &mut None);
 
     assert!(result.is_err(), "expected Err when closer is stacked");
     let msg = result.unwrap_err();
@@ -16692,13 +16658,8 @@ pub fn close_pane_absorbing_to_rejects_suppressed_closer() {
         .unwrap();
     assert!(tab.suppressed_panes.contains_key(&PaneId::Terminal(2)));
 
-    let result = tab.close_pane_absorbing_to(
-        PaneId::Terminal(2),
-        "terminal_1",
-        false,
-        None,
-        &mut None,
-    );
+    let result =
+        tab.close_pane_absorbing_to(PaneId::Terminal(2), "terminal_1", false, None, &mut None);
 
     assert!(result.is_err(), "expected Err when closer is suppressed");
     let msg = result.unwrap_err();
@@ -16725,7 +16686,10 @@ pub fn close_focused_pane_absorbing_to_rejects_floating_focus() {
 
     let result = tab.close_focused_pane_absorbing_to(1, "terminal_2", &mut None);
 
-    assert!(result.is_err(), "expected Err when focused pane is floating");
+    assert!(
+        result.is_err(),
+        "expected Err when focused pane is floating"
+    );
     let msg = result.unwrap_err();
     assert!(
         msg.contains("tiled") || msg.contains("floating"),
@@ -16749,7 +16713,8 @@ pub fn close_pane_absorbing_to_resolves_pane_name() {
     tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
         .unwrap();
     // Give T2 a custom title so the name lookup has something to match.
-    tab.rename_pane(b"editor".to_vec(), PaneId::Terminal(2)).ok();
+    tab.rename_pane(b"editor".to_vec(), PaneId::Terminal(2))
+        .ok();
 
     tab.close_pane_absorbing_to(PaneId::Terminal(1), "editor", false, None, &mut None)
         .unwrap();
@@ -16826,6 +16791,7 @@ pub fn cross_patch_drawer_thread_end_to_end() {
             target_pane: "terminal_2".to_string(),
             direction: Direction::Down,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -16849,6 +16815,7 @@ pub fn cross_patch_drawer_thread_end_to_end() {
             target_pane: "terminal_2".to_string(),
             direction: Direction::Left,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -16870,14 +16837,8 @@ pub fn cross_patch_drawer_thread_end_to_end() {
 
     // Step 4: Patch 3 — close T --absorb-to B. T's right aligning group
     // is [B, D]; the whole column grows into T's freed columns.
-    tab.close_pane_absorbing_to(
-        PaneId::Terminal(5),
-        "terminal_2",
-        false,
-        None,
-        &mut None,
-    )
-    .expect("absorb-to B should succeed — whole [B, D] column grows together");
+    tab.close_pane_absorbing_to(PaneId::Terminal(5), "terminal_2", false, None, &mut None)
+        .expect("absorb-to B should succeed — whole [B, D] column grows together");
 
     assert!(!tab.has_pane_with_pid(&PaneId::Terminal(5)));
     assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 60, 20));
@@ -16995,6 +16956,7 @@ pub fn cross_patch_gabi_layout_drawer_first_thread_second_absorb_to_editor() {
             target_pane: "editor".to_string(),
             direction: Direction::Down,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -17012,6 +16974,7 @@ pub fn cross_patch_gabi_layout_drawer_first_thread_second_absorb_to_editor() {
             target_pane: "editor".to_string(),
             direction: Direction::Left,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -17094,6 +17057,7 @@ pub fn cross_patch_gabi_layout_thread_first_drawer_second_absorb_to_editor() {
             target_pane: "editor".to_string(),
             direction: Direction::Left,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -17111,6 +17075,7 @@ pub fn cross_patch_gabi_layout_thread_first_drawer_second_absorb_to_editor() {
             target_pane: "editor".to_string(),
             direction: Direction::Down,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,
@@ -18063,6 +18028,7 @@ fn move_pane_with_stacked_target_succeeds() {
             target_pane: "terminal_1".to_string(),
             direction: Direction::Down,
             borderless: None,
+            size: None,
         },
         Some(1),
         None,

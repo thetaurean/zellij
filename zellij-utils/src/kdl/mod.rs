@@ -843,6 +843,7 @@ impl Action {
                     NewPanePlacement::Tiled {
                         direction,
                         borderless: _,
+                        size: _,
                     },
                 command: run_command_action,
                 pane_name: name,
@@ -2029,6 +2030,7 @@ impl TryFrom<(&KdlNode, &Options)> for Action {
                         placement: NewPanePlacement::Tiled {
                             direction,
                             borderless: None,
+                            size: None,
                         },
                         command: Some(run_command_action),
                         pane_name: name,

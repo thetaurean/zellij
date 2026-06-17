@@ -1505,6 +1505,7 @@ impl Tab {
             NewPanePlacement::Tiled {
                 direction: None,
                 borderless,
+                size: _,
             } => self.new_tiled_pane(
                 pid,
                 initial_pane_title,
@@ -1518,6 +1519,7 @@ impl Tab {
             NewPanePlacement::Tiled {
                 direction: Some(direction),
                 borderless,
+                size: _,
             } => {
                 if let Some(client_id) = client_id {
                     if direction == Direction::Left || direction == Direction::Right {
@@ -1544,6 +1546,7 @@ impl Tab {
                 target_pane,
                 direction,
                 borderless,
+                size: _,
             } => self.new_tiled_pane_near_target(
                 pid,
                 initial_pane_title,

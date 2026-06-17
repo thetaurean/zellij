@@ -2100,6 +2100,7 @@ fn group_panes_following_focus() {
                     NewPanePlacement::Tiled {
                         direction: None,
                         borderless: None,
+                        size: None,
                     },
                     Some(client_id),
                     None,
@@ -2161,6 +2162,7 @@ fn break_group_with_mouse() {
                     NewPanePlacement::Tiled {
                         direction: None,
                         borderless: None,
+                        size: None,
                     },
                     Some(client_id),
                     None,

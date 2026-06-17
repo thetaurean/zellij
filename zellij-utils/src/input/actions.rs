@@ -2329,11 +2329,13 @@ fn tiled_placement_from_cli(
                 target_pane,
                 direction,
                 borderless,
+                size: None,
             })
         },
         None => Ok(NewPanePlacement::Tiled {
             direction,
             borderless,
+            size: None,
         }),
     }
 }
@@ -3859,6 +3861,7 @@ mod tests {
                         target_pane: "terminal_9".to_string(),
                         direction: Direction::Right,
                         borderless: Some(true),
+                        size: None,
                     }
                 );
             },
@@ -3909,6 +3912,7 @@ mod tests {
                         target_pane: "editor".to_string(),
                         direction: Direction::Down,
                         borderless: None,
+                        size: None,
                     }
                 );
             },
