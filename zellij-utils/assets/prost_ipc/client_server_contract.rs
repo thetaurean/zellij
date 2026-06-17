@@ -1050,6 +1050,8 @@ pub struct NewTiledPluginPaneAction {
     pub cwd: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(uint32, optional, tag="5")]
     pub tab_id: ::core::option::Option<u32>,
+    #[prost(message, optional, tag="6")]
+    pub placement: ::core::option::Option<NewPanePlacement>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

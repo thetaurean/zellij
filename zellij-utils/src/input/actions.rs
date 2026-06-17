@@ -436,6 +436,7 @@ pub enum Action {
         pane_name: Option<String>,
         skip_cache: bool,
         cwd: Option<PathBuf>,
+        placement: Option<NewPanePlacement>,
         tab_id: Option<usize>,
     },
     /// Returns: Created pane ID (format: plugin_<id>)
@@ -1195,25 +1196,39 @@ impl Action {
                             tab_id,
                         }])
                     } else {
-                        // it is intentional that a new tiled plugin pane cannot include a
-                        // direction
-                        // this is because the cli client opening a tiled plugin pane is a
-                        // different client than the one opening the pane, and this can potentially
-                        // create very confusing races if the client changes focus while the plugin
-                        // is being loaded
-                        // this is not the case with terminal panes for historical reasons of
-                        // backwards compatibility to a time before we had auto layouts
-                        if width.is_some() || height.is_some() {
-                            return Err(
-                                "--width/--height are not supported for tiled plugin panes (pass --floating or omit the size)"
-                                    .to_string(),
-                            );
-                        }
+                        let placement = if target_pane.is_some() {
+                            Some(tiled_placement_from_cli(
+                                target_pane,
+                                direction,
+                                borderless,
+                                width,
+                                height,
+                            )?)
+                        } else {
+                            // A plain tiled plugin pane intentionally carries no placement:
+                            // the CLI client requesting the pane can race the focused pane while
+                            // the plugin is still loading. Targeted placement is safe because it
+                            // resolves against an explicit pane reference.
+                            if width.is_some() || height.is_some() {
+                                return Err(
+                                    "--width/--height are not supported for tiled plugin panes (pass --target-pane with --direction, use --floating, or omit the size)"
+                                        .to_string(),
+                                );
+                            }
+                            if direction.is_some() || borderless.is_some() {
+                                return Err(
+                                    "--direction/--borderless for tiled plugin panes require --target-pane; plain tiled plugin placement is intentionally unsupported because plugin loading can race focus"
+                                        .to_string(),
+                                );
+                            }
+                            None
+                        };
                         Ok(vec![Action::NewTiledPluginPane {
                             plugin,
                             pane_name: name,
                             skip_cache: skip_plugin_cache,
                             cwd,
+                            placement,
                             tab_id,
                         }])
                     }
@@ -2457,6 +2472,7 @@ mod tests {
         height: Option<String>,
         in_place: bool,
         stacked: bool,
+        borderless: Option<bool>,
     }
 
     fn new_pane_cli_fixture(f: NewPaneFixture) -> CliAction {
@@ -2486,7 +2502,7 @@ mod tests {
             block_until_exit: false,
             unblock_condition: None,
             near_current_pane: false,
-            borderless: None,
+            borderless: f.borderless,
             tab_id: None,
         }
     }
@@ -4442,6 +4458,63 @@ mod tests {
     }
 
     #[test]
+    fn test_new_pane_plugin_tiled_near_target_with_fixed_height() {
+        let cli_action = new_pane_cli_fixture(NewPaneFixture {
+            direction: Some(Direction::Down),
+            target_pane: Some("drawer".to_string()),
+            plugin: Some("zellij:strider".into()),
+            height: Some("2".to_string()),
+            borderless: Some(true),
+            ..Default::default()
+        });
+        let actions =
+            Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None).unwrap();
+        match &actions[0] {
+            Action::NewTiledPluginPane { placement, .. } => assert_eq!(
+                placement,
+                &Some(NewPanePlacement::TiledNearTarget {
+                    target_pane: "drawer".to_string(),
+                    direction: Direction::Down,
+                    borderless: Some(true),
+                    size: Some(SplitSize::Fixed(2)),
+                })
+            ),
+            _ => panic!("Expected NewTiledPluginPane action"),
+        }
+    }
+
+    #[test]
+    fn test_new_pane_plugin_tiled_size_without_target_is_rejected() {
+        let cli_action = new_pane_cli_fixture(NewPaneFixture {
+            direction: Some(Direction::Down),
+            plugin: Some("zellij:strider".into()),
+            height: Some("2".to_string()),
+            ..Default::default()
+        });
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error.contains("tiled plugin panes"));
+        assert!(error.contains("--target-pane"));
+    }
+
+    #[test]
+    fn test_new_pane_plugin_tiled_without_target_or_placement_is_allowed() {
+        let cli_action = new_pane_cli_fixture(NewPaneFixture {
+            plugin: Some("zellij:strider".into()),
+            ..Default::default()
+        });
+        let actions =
+            Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None).unwrap();
+        match &actions[0] {
+            Action::NewTiledPluginPane { placement, .. } => {
+                assert_eq!(placement, &None);
+            },
+            _ => panic!("Expected NewTiledPluginPane action"),
+        }
+    }
+
+    #[test]
     fn test_new_pane_plugin_tiled_with_size_is_rejected() {
         let cli_action = CliAction::NewPane {
             direction: None,
@@ -4473,10 +4546,9 @@ mod tests {
             tab_id: None,
         };
         let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
-        assert_eq!(
-            result.unwrap_err(),
-            "--width/--height are not supported for tiled plugin panes (pass --floating or omit the size)"
-        );
+        let error = result.unwrap_err();
+        assert!(error.contains("tiled plugin panes"));
+        assert!(error.contains("--target-pane"));
     }
 
     #[test]

@@ -489,6 +489,8 @@ pub struct NewPluginPanePayload {
     pub pane_name: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(bool, tag="3")]
     pub skip_plugin_cache: bool,
+    #[prost(message, optional, tag="4")]
+    pub placement: ::core::option::Option<NewPanePlacement>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -710,7 +712,7 @@ pub struct SetPaneBorderlessPayload {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct NewPanePlacement {
-    #[prost(oneof="new_pane_placement::PlacementVariant", tags="1, 2, 3, 4, 5")]
+    #[prost(oneof="new_pane_placement::PlacementVariant", tags="1, 2, 3, 4, 5, 6")]
     pub placement_variant: ::core::option::Option<new_pane_placement::PlacementVariant>,
 }
 /// Nested message and enum types in `NewPanePlacement`.
@@ -728,6 +730,8 @@ pub mod new_pane_placement {
         InPlace(super::InPlaceConfig),
         #[prost(message, tag="5")]
         Stacked(super::StackedPlacement),
+        #[prost(message, tag="6")]
+        TiledNearTarget(super::TiledNearTargetPlacement),
     }
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -743,6 +747,20 @@ pub struct TiledPlacement {
     pub direction: ::core::option::Option<i32>,
     #[prost(bool, optional, tag="2")]
     pub borderless: ::core::option::Option<bool>,
+    #[prost(message, optional, tag="3")]
+    pub size: ::core::option::Option<SplitSize>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TiledNearTargetPlacement {
+    #[prost(string, tag="1")]
+    pub target_pane: ::prost::alloc::string::String,
+    #[prost(enumeration="super::resize::ResizeDirection", tag="2")]
+    pub direction: i32,
+    #[prost(bool, optional, tag="3")]
+    pub borderless: ::core::option::Option<bool>,
+    #[prost(message, optional, tag="4")]
+    pub size: ::core::option::Option<SplitSize>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

@@ -287,6 +287,7 @@ message NewPluginPanePayload {
   string plugin_url = 1;
   optional string pane_name = 2;
   bool skip_plugin_cache = 3;
+  optional NewPanePlacement placement = 4;
 }
 
 enum SearchDirection {
@@ -547,6 +548,7 @@ message NewPanePlacement {
     FloatingPlacement floating = 3;
     InPlaceConfig in_place = 4;
     StackedPlacement stacked = 5;
+    TiledNearTargetPlacement tiled_near_target = 6;
   }
 }
 
@@ -557,6 +559,14 @@ message NoPreferenceOptions {
 message TiledPlacement {
   optional resize.ResizeDirection direction = 1;
   optional bool borderless = 2;
+  optional SplitSize size = 3;
+}
+
+message TiledNearTargetPlacement {
+  string target_pane = 1;
+  resize.ResizeDirection direction = 2;
+  optional bool borderless = 3;
+  optional SplitSize size = 4;
 }
 
 message FloatingPlacement {

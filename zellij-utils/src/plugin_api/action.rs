@@ -67,6 +67,7 @@ pub use super::generated_api::api::{
         SwitchToModePayload,
         TabIdAndName,
         TabLayoutInfo as ProtobufTabLayoutInfo,
+        TiledNearTargetPlacement as ProtobufTiledNearTargetPlacement,
         TiledPaneLayout as ProtobufTiledPaneLayout,
         TiledPlacement as ProtobufTiledPlacement,
         UnblockCondition as ProtobufUnblockCondition,
@@ -832,6 +833,7 @@ impl TryFrom<ProtobufAction> for Action {
                             pane_name,
                             skip_cache: skip_plugin_cache,
                             cwd: None,
+                            placement: payload.placement.map(TryInto::try_into).transpose()?,
                             tab_id: None,
                         })
                     },
@@ -1727,6 +1729,7 @@ impl TryFrom<Action> for ProtobufAction {
                 pane_name,
                 skip_cache: skip_plugin_cache,
                 cwd: _cwd,
+                placement,
                 ..
             } => Ok(ProtobufAction {
                 name: ProtobufActionName::NewTiledPluginPane as i32,
@@ -1735,6 +1738,7 @@ impl TryFrom<Action> for ProtobufAction {
                         plugin_url: run_plugin.location_string(),
                         pane_name,
                         skip_plugin_cache,
+                        placement: placement.map(TryInto::try_into).transpose()?,
                     },
                 )),
             }),
@@ -1752,6 +1756,7 @@ impl TryFrom<Action> for ProtobufAction {
                         plugin_url: run_plugin.location_string(),
                         pane_name,
                         skip_plugin_cache,
+                        placement: None,
                     },
                 )),
             }),
@@ -2476,9 +2481,17 @@ impl TryFrom<ProtobufNewPanePlacement> for NewPanePlacement {
                 Ok(NewPanePlacement::Tiled {
                     direction,
                     borderless: tiled.borderless,
-                    size: None,
+                    size: tiled.size.map(TryInto::try_into).transpose()?,
                 })
             },
+            Some(PlacementVariant::TiledNearTarget(tiled)) => Ok(NewPanePlacement::TiledNearTarget {
+                target_pane: tiled.target_pane,
+                direction: ProtobufResizeDirection::from_i32(tiled.direction)
+                    .and_then(|d| d.try_into().ok())
+                    .ok_or("Malformed TiledNearTarget direction")?,
+                borderless: tiled.borderless,
+                size: tiled.size.map(TryInto::try_into).transpose()?,
+            }),
             Some(PlacementVariant::Floating(floating)) => {
                 let coords = floating.coordinates.and_then(|c| c.try_into().ok());
                 Ok(NewPanePlacement::Floating(coords))
@@ -2519,7 +2532,7 @@ impl TryFrom<NewPanePlacement> for ProtobufNewPanePlacement {
             NewPanePlacement::Tiled {
                 direction,
                 borderless,
-                size: _,
+                size,
             } => {
                 let direction = direction.and_then(|d| {
                     let protobuf_direction: ProtobufResizeDirection = d.try_into().ok()?;
@@ -2528,11 +2541,22 @@ impl TryFrom<NewPanePlacement> for ProtobufNewPanePlacement {
                 Some(PlacementVariant::Tiled(ProtobufTiledPlacement {
                     direction,
                     borderless,
+                    size: size.and_then(|s| s.try_into().ok()),
                 }))
             },
-            NewPanePlacement::TiledNearTarget { .. } => {
-                return Err("TiledNearTarget is not supported in plugin API protobuf");
-            },
+            NewPanePlacement::TiledNearTarget {
+                target_pane,
+                direction,
+                borderless,
+                size,
+            } => Some(PlacementVariant::TiledNearTarget(
+                ProtobufTiledNearTargetPlacement {
+                    target_pane,
+                    direction: ProtobufResizeDirection::try_from(direction)? as i32,
+                    borderless,
+                    size: size.and_then(|s| s.try_into().ok()),
+                },
+            )),
             NewPanePlacement::Floating(coords) => {
                 let coordinates = coords.and_then(|c| c.try_into().ok());
                 Some(PlacementVariant::Floating(ProtobufFloatingPlacement {

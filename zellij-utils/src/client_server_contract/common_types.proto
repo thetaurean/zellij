@@ -593,6 +593,7 @@ message NewTiledPluginPaneAction {
   bool skip_cache = 3;
   optional string cwd = 4;
   optional uint32 tab_id = 5;
+  optional NewPanePlacement placement = 6;
 }
 
 message NewFloatingPluginPaneAction {

@@ -1462,14 +1462,15 @@ impl From<crate::input::actions::Action>
                 pane_name,
                 skip_cache,
                 cwd,
+                placement,
                 tab_id,
-                ..
             } => ActionType::NewTiledPluginPane(NewTiledPluginPaneAction {
                 plugin: Some(plugin.into()),
                 pane_name,
                 skip_cache,
                 cwd: cwd.map(|p| p.to_string_lossy().to_string()),
                 tab_id: tab_id.map(|t| t as u32),
+                placement: placement.map(Into::into),
             }),
             crate::input::actions::Action::NewFloatingPluginPane {
                 plugin,
@@ -2369,6 +2370,10 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                     pane_name: new_tiled_plugin_action.pane_name,
                     skip_cache: new_tiled_plugin_action.skip_cache,
                     cwd: new_tiled_plugin_action.cwd.map(PathBuf::from),
+                    placement: new_tiled_plugin_action
+                        .placement
+                        .map(TryInto::try_into)
+                        .transpose()?,
                     tab_id: new_tiled_plugin_action.tab_id.map(|t| t as usize),
                 })
             },

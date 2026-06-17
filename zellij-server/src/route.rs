@@ -1311,6 +1311,7 @@ pub(crate) fn route_action(
             pane_name: name,
             skip_cache,
             cwd,
+            placement: _placement,
             tab_id,
         } => {
             senders
