@@ -536,6 +536,122 @@ fn new_pane_down_of_leaf_target_creates_vertical_pair() {
 }
 
 #[test]
+fn new_pane_down_of_target_with_fixed_height_is_exact() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+            size: Some(SplitSize::Fixed(2)),
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 18));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 18, 120, 2));
+}
+
+#[test]
+fn new_pane_down_of_target_with_percent_height() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+            size: Some(SplitSize::Percent(20)),
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 16));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 16, 120, 4));
+}
+
+#[test]
+fn new_pane_down_of_target_with_oversize_height_clamps() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+            size: Some(SplitSize::Fixed(100)),
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)).3, 19);
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)).3, 1);
+}
+
+#[test]
+fn new_pane_right_of_target_with_fixed_width_is_exact() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+
+    tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Right,
+            borderless: None,
+            size: Some(SplitSize::Fixed(30)),
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 90, 20));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (90, 0, 30, 20));
+}
+
+#[test]
 fn new_pane_down_of_leaf_target_beside_sibling_splits_only_target() {
     let size = Size {
         cols: 120,

@@ -80,6 +80,30 @@ fn sized_split(size: SplitSize, total: usize, _new_is_lead: bool) -> (usize, usi
     (new_cells, other_cells, dimension)
 }
 
+fn percent_split_dimensions(
+    requested_percent: usize,
+    parent_percent: Option<f64>,
+    first_cells: usize,
+    second_cells: usize,
+    new_is_second: bool,
+) -> Option<(Dimension, Dimension)> {
+    let parent_percent = parent_percent?;
+    let new_percent = parent_percent * requested_percent as f64 / 100.0;
+    let other_percent = (parent_percent - new_percent).max(0.0);
+    let (first_percent, second_percent) = if new_is_second {
+        (other_percent, new_percent)
+    } else {
+        (new_percent, other_percent)
+    };
+
+    let mut first_dim = Dimension::percent(first_percent);
+    first_dim.set_inner(first_cells);
+    let mut second_dim = Dimension::percent(second_percent);
+    second_dim.set_inner(second_cells);
+
+    Some((first_dim, second_dim))
+}
+
 pub struct TiledPanes {
     pub panes: BTreeMap<PaneId, Box<dyn Pane>>,
     display_area: Rc<RefCell<Size>>,
@@ -806,6 +830,7 @@ impl TiledPanes {
         &self,
         target_pane_id: PaneId,
         direction: Direction,
+        size: Option<SplitSize>,
     ) -> Option<(Vec<(PaneId, PaneGeom)>, PaneGeom, PaneGeom, SplitDirection)> {
         let Some(target_geom) = self
             .panes
@@ -947,20 +972,85 @@ impl TiledPanes {
         let Some((mut first_geom, mut second_geom)) = split(split_direction, &group_geom) else {
             return None;
         };
+        let new_is_second = matches!(direction, Direction::Right | Direction::Down);
         match split_direction {
             SplitDirection::Vertical => {
-                let first_cols = group_geom.cols.as_usize() / 2;
-                let second_cols = group_geom.cols.as_usize().saturating_sub(first_cols);
+                let total = group_geom.cols.as_usize();
+                let (first_cols, second_cols, new_dim) = match size {
+                    Some(size) => {
+                        let (new_cells, other_cells, dim) = sized_split(size, total, new_is_second);
+                        if new_is_second {
+                            (other_cells, new_cells, Some(dim))
+                        } else {
+                            (new_cells, other_cells, Some(dim))
+                        }
+                    },
+                    None => {
+                        let first = total / 2;
+                        (first, total.saturating_sub(first), None)
+                    },
+                };
                 first_geom.cols.set_inner(first_cols);
                 second_geom.x = first_geom.x + first_cols;
                 second_geom.cols.set_inner(second_cols);
+                if let Some((first_dim, second_dim)) = match size {
+                    Some(SplitSize::Percent(percent)) => percent_split_dimensions(
+                        percent,
+                        group_geom.cols.as_percent(),
+                        first_cols,
+                        second_cols,
+                        new_is_second,
+                    ),
+                    _ => None,
+                } {
+                    first_geom.cols = first_dim;
+                    second_geom.cols = second_dim;
+                } else if let Some(dim) = new_dim {
+                    if new_is_second {
+                        second_geom.cols = dim;
+                    } else {
+                        first_geom.cols = dim;
+                    }
+                }
             },
             SplitDirection::Horizontal => {
-                let first_rows = group_geom.rows.as_usize() / 2;
-                let second_rows = group_geom.rows.as_usize().saturating_sub(first_rows);
+                let total = group_geom.rows.as_usize();
+                let (first_rows, second_rows, new_dim) = match size {
+                    Some(size) => {
+                        let (new_cells, other_cells, dim) = sized_split(size, total, new_is_second);
+                        if new_is_second {
+                            (other_cells, new_cells, Some(dim))
+                        } else {
+                            (new_cells, other_cells, Some(dim))
+                        }
+                    },
+                    None => {
+                        let first = total / 2;
+                        (first, total.saturating_sub(first), None)
+                    },
+                };
                 first_geom.rows.set_inner(first_rows);
                 second_geom.y = first_geom.y + first_rows;
                 second_geom.rows.set_inner(second_rows);
+                if let Some((first_dim, second_dim)) = match size {
+                    Some(SplitSize::Percent(percent)) => percent_split_dimensions(
+                        percent,
+                        group_geom.rows.as_percent(),
+                        first_rows,
+                        second_rows,
+                        new_is_second,
+                    ),
+                    _ => None,
+                } {
+                    first_geom.rows = first_dim;
+                    second_geom.rows = second_dim;
+                } else if let Some(dim) = new_dim {
+                    if new_is_second {
+                        second_geom.rows = dim;
+                    } else {
+                        first_geom.rows = dim;
+                    }
+                }
             },
         }
 
@@ -981,7 +1071,7 @@ impl TiledPanes {
         target_pane_id: PaneId,
         direction: Direction,
     ) -> bool {
-        self.pane_group_split_near_pane_id(target_pane_id, direction)
+        self.pane_group_split_near_pane_id(target_pane_id, direction, None)
             .is_some()
     }
     pub fn pane_ids_in_insert_group_near_pane_id(
@@ -989,7 +1079,7 @@ impl TiledPanes {
         target_pane_id: PaneId,
         direction: Direction,
     ) -> Option<HashSet<PaneId>> {
-        self.pane_group_split_near_pane_id(target_pane_id, direction)
+        self.pane_group_split_near_pane_id(target_pane_id, direction, None)
             .map(|(pane_ids_and_geoms, _, _, _)| {
                 pane_ids_and_geoms
                     .into_iter()
@@ -1095,7 +1185,7 @@ impl TiledPanes {
         };
         // Step 3: re-insert at the target location, reusing patch 1's helper.
         if let Err(unused_source) =
-            self.insert_pane_near_pane_id(target, source, source_pane, direction)
+            self.insert_pane_near_pane_id(target, source, source_pane, direction, None)
         {
             // Defensive: pre-validation passed but the actual insert failed. Recover the pane
             // by re-inserting into self.panes (with its old, now-overlapping geometry; user can
@@ -1116,9 +1206,10 @@ impl TiledPanes {
         pane_id: PaneId,
         mut new_pane: Box<dyn Pane>,
         direction: Direction,
+        size: Option<SplitSize>,
     ) -> Result<(), Box<dyn Pane>> {
         let Some((grouped_pane_ids_and_geoms, group_side_geom, new_pane_geom, split_direction)) =
-            self.pane_group_split_near_pane_id(target_pane_id, direction)
+            self.pane_group_split_near_pane_id(target_pane_id, direction, size)
         else {
             return Err(new_pane);
         };

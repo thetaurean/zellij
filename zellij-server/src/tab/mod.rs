@@ -62,7 +62,7 @@ use zellij_utils::{
         command::TerminalAction,
         layout::{
             FloatingPaneLayout, Run, RunPluginOrAlias, SwapFloatingLayout, SwapTiledLayout,
-            TiledPaneLayout,
+            SplitSize, TiledPaneLayout,
         },
         parse_keys,
     },
@@ -1546,7 +1546,7 @@ impl Tab {
                 target_pane,
                 direction,
                 borderless,
-                size: _,
+                size,
             } => self.new_tiled_pane_near_target(
                 pid,
                 initial_pane_title,
@@ -1558,6 +1558,7 @@ impl Tab {
                 client_id,
                 blocking_notification,
                 borderless,
+                size,
             ),
             NewPanePlacement::Floating(floating_pane_coordinates) => self.new_floating_pane(
                 pid,
@@ -1823,6 +1824,7 @@ impl Tab {
         client_id: Option<ClientId>,
         blocking_notification: Option<NotificationEnd>,
         borderless: Option<bool>,
+        size: Option<SplitSize>,
     ) -> Result<()> {
         let err_context =
             || format!("failed to create new pane with id {pid:?} near target {target_pane}");
@@ -1974,7 +1976,7 @@ impl Tab {
         new_pane.set_active_at(Instant::now());
         match self
             .tiled_panes
-            .insert_pane_near_pane_id(target_pane_id, pid, new_pane, direction)
+            .insert_pane_near_pane_id(target_pane_id, pid, new_pane, direction, size)
         {
             Ok(()) => {
                 self.set_should_clear_display_before_rendering();
