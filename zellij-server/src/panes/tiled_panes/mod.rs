@@ -81,20 +81,19 @@ fn sized_split(size: SplitSize, total: usize, _new_is_lead: bool) -> (usize, usi
 }
 
 fn percent_split_dimensions(
-    requested_percent: usize,
+    _requested_percent: usize,
     parent_percent: Option<f64>,
     first_cells: usize,
     second_cells: usize,
-    new_is_second: bool,
+    _new_is_second: bool,
 ) -> Option<(Dimension, Dimension)> {
     let parent_percent = parent_percent?;
-    let new_percent = parent_percent * requested_percent as f64 / 100.0;
-    let other_percent = (parent_percent - new_percent).max(0.0);
-    let (first_percent, second_percent) = if new_is_second {
-        (other_percent, new_percent)
-    } else {
-        (new_percent, other_percent)
-    };
+    let total_cells = first_cells + second_cells;
+    if total_cells == 0 {
+        return None;
+    }
+    let first_percent = parent_percent * first_cells as f64 / total_cells as f64;
+    let second_percent = (parent_percent - first_percent).max(0.0);
 
     let mut first_dim = Dimension::percent(first_percent);
     first_dim.set_inner(first_cells);
@@ -3394,7 +3393,7 @@ pub fn pane_geom_is_inside_viewport(viewport: &Viewport, geom: &PaneGeom) -> boo
 
 #[cfg(test)]
 mod fixed_size_split_tests {
-    use super::sized_split;
+    use super::{percent_split_dimensions, sized_split};
     use zellij_utils::input::layout::SplitSize;
 
     // (new_cells, other_cells)
@@ -3422,6 +3421,42 @@ mod fixed_size_split_tests {
         assert_eq!((new, other), (4, 16));
         assert_eq!(dim.as_percent(), Some(20.0));
         assert_eq!(dim.as_usize(), 4);
+    }
+
+    #[test]
+    fn percent_split_dimensions_preserve_unclamped_percent_request() {
+        let (new, other, _dim) = sized_split(SplitSize::Percent(20), 20, false);
+        let (new_dim, other_dim) =
+            percent_split_dimensions(20, Some(100.0), new, other, false).unwrap();
+
+        assert_eq!(new_dim.as_percent(), Some(20.0));
+        assert_eq!(other_dim.as_percent(), Some(80.0));
+        assert_eq!(new_dim.as_usize(), 4);
+        assert_eq!(other_dim.as_usize(), 16);
+    }
+
+    #[test]
+    fn percent_split_dimensions_clamp_zero_percent_to_cell_share() {
+        let (new, other, _dim) = sized_split(SplitSize::Percent(0), 20, false);
+        let (new_dim, other_dim) =
+            percent_split_dimensions(0, Some(100.0), new, other, false).unwrap();
+
+        assert_eq!(new_dim.as_percent(), Some(5.0));
+        assert_eq!(other_dim.as_percent(), Some(95.0));
+        assert_eq!(new_dim.as_usize(), 1);
+        assert_eq!(other_dim.as_usize(), 19);
+    }
+
+    #[test]
+    fn percent_split_dimensions_clamp_hundred_percent_to_cell_share() {
+        let (new, other, _dim) = sized_split(SplitSize::Percent(100), 20, false);
+        let (first_dim, second_dim) =
+            percent_split_dimensions(100, Some(100.0), other, new, true).unwrap();
+
+        assert_eq!(first_dim.as_percent(), Some(5.0));
+        assert_eq!(second_dim.as_percent(), Some(95.0));
+        assert_eq!(first_dim.as_usize(), 1);
+        assert_eq!(second_dim.as_usize(), 19);
     }
 
     #[test]

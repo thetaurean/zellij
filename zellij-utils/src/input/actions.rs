@@ -1123,12 +1123,14 @@ impl Action {
                             x, y, width, height, pinned, borderless,
                         ))
                     } else if in_place {
+                        unsupported_non_floating_size(width.as_ref(), height.as_ref())?;
                         NewPanePlacement::InPlace {
                             pane_id_to_replace: None,
                             close_replaced_pane,
                             borderless,
                         }
                     } else if stacked {
+                        unsupported_non_floating_size(width.as_ref(), height.as_ref())?;
                         NewPanePlacement::Stacked {
                             pane_id_to_stack_under: None,
                             borderless,
@@ -1184,6 +1186,7 @@ impl Action {
                             tab_id,
                         }])
                     } else if in_place {
+                        unsupported_non_floating_size(width.as_ref(), height.as_ref())?;
                         Ok(vec![Action::NewInPlacePluginPane {
                             plugin,
                             pane_name: name,
@@ -1239,6 +1242,7 @@ impl Action {
                             tab_id,
                         }])
                     } else if in_place {
+                        unsupported_non_floating_size(width.as_ref(), height.as_ref())?;
                         Ok(vec![Action::NewInPlacePane {
                             command: Some(run_command_action),
                             pane_name: name,
@@ -1248,6 +1252,7 @@ impl Action {
                             tab_id,
                         }])
                     } else if stacked {
+                        unsupported_non_floating_size(width.as_ref(), height.as_ref())?;
                         Ok(vec![Action::NewStackedPane {
                             command: Some(run_command_action),
                             pane_name: name,
@@ -1282,6 +1287,7 @@ impl Action {
                             tab_id,
                         }])
                     } else if in_place {
+                        unsupported_non_floating_size(width.as_ref(), height.as_ref())?;
                         Ok(vec![Action::NewInPlacePane {
                             command: None,
                             pane_name: name,
@@ -1291,6 +1297,7 @@ impl Action {
                             tab_id,
                         }])
                     } else if stacked {
+                        unsupported_non_floating_size(width.as_ref(), height.as_ref())?;
                         Ok(vec![Action::NewStackedPane {
                             command: None,
                             pane_name: name,
@@ -2366,6 +2373,20 @@ fn tiled_placement_from_cli(
     }
 }
 
+fn unsupported_non_floating_size(
+    width: Option<&String>,
+    height: Option<&String>,
+) -> Result<(), String> {
+    if width.is_some() || height.is_some() {
+        Err(
+            "--width/--height are only supported for floating panes or tiled panes with --direction"
+                .to_string(),
+        )
+    } else {
+        Ok(())
+    }
+}
+
 /// Resolve `--width`/`--height` into a single `SplitSize` along the tiled
 /// split axis:
 ///   - down/up   -> `--height` sets rows; `--width` is an error
@@ -2430,19 +2451,23 @@ mod tests {
     struct NewPaneFixture {
         direction: Option<Direction>,
         target_pane: Option<String>,
+        command: Vec<String>,
+        plugin: Option<String>,
         width: Option<String>,
         height: Option<String>,
+        in_place: bool,
+        stacked: bool,
     }
 
     fn new_pane_cli_fixture(f: NewPaneFixture) -> CliAction {
         CliAction::NewPane {
             direction: f.direction,
             target_pane: f.target_pane,
-            command: vec![],
-            plugin: None,
+            command: f.command,
+            plugin: f.plugin,
             cwd: None,
             floating: false,
-            in_place: false,
+            in_place: f.in_place,
             close_replaced_pane: false,
             name: None,
             close_on_exit: false,
@@ -2454,7 +2479,7 @@ mod tests {
             width: f.width,
             height: f.height,
             pinned: None,
-            stacked: false,
+            stacked: f.stacked,
             blocking: false,
             block_until_exit_success: false,
             block_until_exit_failure: false,
@@ -2464,6 +2489,12 @@ mod tests {
             borderless: None,
             tab_id: None,
         }
+    }
+
+    fn unsupported_size_error(result: Result<Vec<Action>, String>) -> String {
+        let error = result.expect_err("pane sizes should be rejected for this placement");
+        assert!(error.contains("--width/--height"));
+        error
     }
 
     #[test]
@@ -4229,6 +4260,40 @@ mod tests {
     }
 
     #[test]
+    fn test_new_pane_in_place_with_size_is_rejected() {
+        for command in [vec![], vec!["ls".to_string()]] {
+            let cli_action = new_pane_cli_fixture(NewPaneFixture {
+                command,
+                in_place: true,
+                height: Some("2".to_string()),
+                ..Default::default()
+            });
+            unsupported_size_error(Action::actions_from_cli(
+                cli_action,
+                Box::new(|| PathBuf::from("/tmp")),
+                None,
+            ));
+        }
+    }
+
+    #[test]
+    fn test_new_pane_stacked_with_size_is_rejected() {
+        for command in [vec![], vec!["ls".to_string()]] {
+            let cli_action = new_pane_cli_fixture(NewPaneFixture {
+                command,
+                stacked: true,
+                width: Some("20%".to_string()),
+                ..Default::default()
+            });
+            unsupported_size_error(Action::actions_from_cli(
+                cli_action,
+                Box::new(|| PathBuf::from("/tmp")),
+                None,
+            ));
+        }
+    }
+
+    #[test]
     fn test_new_pane_blocking_with_tab_id() {
         let cli_action = CliAction::NewPane {
             direction: None,
@@ -4412,6 +4477,21 @@ mod tests {
             result.unwrap_err(),
             "--width/--height are not supported for tiled plugin panes (pass --floating or omit the size)"
         );
+    }
+
+    #[test]
+    fn test_new_pane_plugin_in_place_with_size_is_rejected() {
+        let cli_action = new_pane_cli_fixture(NewPaneFixture {
+            plugin: Some("zellij:strider".into()),
+            in_place: true,
+            height: Some("2".to_string()),
+            ..Default::default()
+        });
+        unsupported_size_error(Action::actions_from_cli(
+            cli_action,
+            Box::new(|| PathBuf::from("/tmp")),
+            None,
+        ));
     }
 
     #[test]
