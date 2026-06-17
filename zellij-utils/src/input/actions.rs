@@ -1200,6 +1200,12 @@ impl Action {
                         // is being loaded
                         // this is not the case with terminal panes for historical reasons of
                         // backwards compatibility to a time before we had auto layouts
+                        if width.is_some() || height.is_some() {
+                            return Err(
+                                "--width/--height are not supported for tiled plugin panes (pass --floating or omit the size)"
+                                    .to_string(),
+                            );
+                        }
                         Ok(vec![Action::NewTiledPluginPane {
                             plugin,
                             pane_name: name,
@@ -4371,6 +4377,44 @@ mod tests {
     }
 
     #[test]
+    fn test_new_pane_plugin_tiled_with_size_is_rejected() {
+        let cli_action = CliAction::NewPane {
+            direction: None,
+            target_pane: None,
+            command: vec![],
+            plugin: Some("zellij:strider".into()),
+            cwd: None,
+            floating: false,
+            in_place: false,
+            close_replaced_pane: false,
+            name: None,
+            close_on_exit: false,
+            start_suspended: false,
+            configuration: None,
+            skip_plugin_cache: false,
+            x: None,
+            y: None,
+            width: None,
+            height: Some("2".to_string()),
+            pinned: None,
+            stacked: false,
+            blocking: false,
+            block_until_exit_success: false,
+            block_until_exit_failure: false,
+            block_until_exit: false,
+            unblock_condition: None,
+            near_current_pane: false,
+            borderless: None,
+            tab_id: None,
+        };
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert_eq!(
+            result.unwrap_err(),
+            "--width/--height are not supported for tiled plugin panes (pass --floating or omit the size)"
+        );
+    }
+
+    #[test]
     fn test_new_pane_plugin_floating_with_tab_id() {
         let cli_action = CliAction::NewPane {
             direction: None,
@@ -4408,6 +4452,51 @@ mod tests {
         match &actions[0] {
             Action::NewFloatingPluginPane { tab_id, .. } => {
                 assert_eq!(*tab_id, Some(1));
+            },
+            _ => panic!("Expected NewFloatingPluginPane action"),
+        }
+    }
+
+    #[test]
+    fn test_new_pane_plugin_floating_with_size() {
+        let cli_action = CliAction::NewPane {
+            direction: None,
+            target_pane: None,
+            command: vec![],
+            plugin: Some("zellij:strider".into()),
+            cwd: None,
+            floating: true,
+            in_place: false,
+            close_replaced_pane: false,
+            name: None,
+            close_on_exit: false,
+            start_suspended: false,
+            configuration: None,
+            skip_plugin_cache: false,
+            x: None,
+            y: None,
+            width: Some("2".to_string()),
+            height: Some("20%".to_string()),
+            pinned: None,
+            stacked: false,
+            blocking: false,
+            block_until_exit_success: false,
+            block_until_exit_failure: false,
+            block_until_exit: false,
+            unblock_condition: None,
+            near_current_pane: false,
+            borderless: None,
+            tab_id: None,
+        };
+        let result = Action::actions_from_cli(cli_action, Box::new(|| PathBuf::from("/tmp")), None);
+        assert!(result.is_ok());
+        let actions = result.unwrap();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            Action::NewFloatingPluginPane { coordinates, .. } => {
+                let coordinates = coordinates.as_ref().unwrap();
+                assert_eq!(coordinates.width, Some(PercentOrFixed::Fixed(2)));
+                assert_eq!(coordinates.height, Some(PercentOrFixed::Percent(20)));
             },
             _ => panic!("Expected NewFloatingPluginPane action"),
         }
