@@ -61,8 +61,8 @@ use zellij_utils::{
     input::{
         command::TerminalAction,
         layout::{
-            FloatingPaneLayout, Run, RunPluginOrAlias, SwapFloatingLayout, SwapTiledLayout,
-            SplitSize, TiledPaneLayout,
+            FloatingPaneLayout, Run, RunPluginOrAlias, SplitSize, SwapFloatingLayout,
+            SwapTiledLayout, TiledPaneLayout,
         },
         parse_keys,
     },
@@ -1519,7 +1519,7 @@ impl Tab {
             NewPanePlacement::Tiled {
                 direction: Some(direction),
                 borderless,
-                size: _,
+                size,
             } => {
                 if let Some(client_id) = client_id {
                     if direction == Direction::Left || direction == Direction::Right {
@@ -1529,6 +1529,7 @@ impl Tab {
                             client_id,
                             blocking_notification,
                             borderless,
+                            size,
                         )?;
                     } else {
                         self.horizontal_split(
@@ -1537,6 +1538,7 @@ impl Tab {
                             client_id,
                             blocking_notification,
                             borderless,
+                            size,
                         )?;
                     }
                 }
@@ -1974,10 +1976,13 @@ impl Tab {
             self.tiled_panes.unset_fullscreen();
         }
         new_pane.set_active_at(Instant::now());
-        match self
-            .tiled_panes
-            .insert_pane_near_pane_id(target_pane_id, pid, new_pane, direction, size)
-        {
+        match self.tiled_panes.insert_pane_near_pane_id(
+            target_pane_id,
+            pid,
+            new_pane,
+            direction,
+            size,
+        ) {
             Ok(()) => {
                 self.set_should_clear_display_before_rendering();
                 if should_focus_pane {
@@ -2571,6 +2576,7 @@ impl Tab {
         client_id: ClientId,
         completion_tx: Option<NotificationEnd>,
         borderless: Option<bool>,
+        size: Option<SplitSize>,
     ) -> Result<()> {
         let err_context =
             || format!("failed to split pane {pid:?} horizontally for client {client_id}");
@@ -2608,8 +2614,12 @@ impl Tab {
                 if let Some(borderless) = borderless {
                     new_terminal.set_borderless(borderless);
                 }
-                self.tiled_panes
-                    .split_pane_horizontally(pid, Box::new(new_terminal), client_id);
+                self.tiled_panes.split_pane_horizontally(
+                    pid,
+                    Box::new(new_terminal),
+                    client_id,
+                    size,
+                );
                 self.set_should_clear_display_before_rendering();
                 self.tiled_panes.focus_pane(pid, client_id);
                 self.swap_layouts.set_is_tiled_damaged();
@@ -2638,6 +2648,7 @@ impl Tab {
         client_id: ClientId,
         completion_tx: Option<NotificationEnd>,
         borderless: Option<bool>,
+        size: Option<SplitSize>,
     ) -> Result<()> {
         let err_context =
             || format!("failed to split pane {pid:?} vertically for client {client_id}");
@@ -2675,8 +2686,12 @@ impl Tab {
                 if let Some(borderless) = borderless {
                     new_terminal.set_borderless(borderless);
                 }
-                self.tiled_panes
-                    .split_pane_vertically(pid, Box::new(new_terminal), client_id);
+                self.tiled_panes.split_pane_vertically(
+                    pid,
+                    Box::new(new_terminal),
+                    client_id,
+                    size,
+                );
                 self.set_should_clear_display_before_rendering();
                 self.tiled_panes.focus_pane(pid, client_id);
                 self.swap_layouts.set_is_tiled_damaged();

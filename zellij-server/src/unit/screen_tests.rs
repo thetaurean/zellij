@@ -1997,7 +1997,7 @@ fn mouse_focus_clears_bell_on_focused_pane() {
         let active_tab = screen.get_active_tab_mut(client_id).unwrap();
         // Split horizontally: pane 1 on top, pane 2 on bottom; focus moves to pane 2
         active_tab
-            .horizontal_split(new_pane_id, None, client_id, None, None)
+            .horizontal_split(new_pane_id, None, client_id, None, None, None)
             .unwrap();
         // Move focus back up to pane 1 so pane 2 is unfocused
         active_tab.move_focus_up(client_id).unwrap();

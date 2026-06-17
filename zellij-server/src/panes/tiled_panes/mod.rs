@@ -717,6 +717,7 @@ impl TiledPanes {
         pid: PaneId,
         mut new_pane: Box<dyn Pane>,
         client_id: ClientId,
+        size: Option<SplitSize>,
     ) {
         let active_pane_id = &self.active_panes.get(&client_id).unwrap();
         let mut full_pane_size = self
@@ -737,9 +738,31 @@ impl TiledPanes {
             }
         }
         let active_pane = self.panes.get_mut(active_pane_id).unwrap();
-        if let Some((top_winsize, bottom_winsize)) =
+        if let Some((mut top_winsize, mut bottom_winsize)) =
             split(SplitDirection::Horizontal, &full_pane_size)
         {
+            if let Some(size) = size {
+                let total = full_pane_size.rows.as_usize();
+                let (new_rows, other_rows, new_dim) = sized_split(size, total, false);
+                top_winsize.rows.set_inner(other_rows);
+                bottom_winsize.y = top_winsize.y + other_rows;
+                bottom_winsize.rows.set_inner(new_rows);
+                if let Some((top_dim, bottom_dim)) = match size {
+                    SplitSize::Percent(percent) => percent_split_dimensions(
+                        percent,
+                        full_pane_size.rows.as_percent(),
+                        other_rows,
+                        new_rows,
+                        true,
+                    ),
+                    _ => None,
+                } {
+                    top_winsize.rows = top_dim;
+                    bottom_winsize.rows = bottom_dim;
+                } else {
+                    bottom_winsize.rows = new_dim;
+                }
+            }
             if active_pane.position_and_size().is_stacked() {
                 match StackedPanes::new_from_btreemap(&mut self.panes, &self.panes_to_hide)
                     .resize_panes_in_stack(&active_pane_id, top_winsize)
@@ -762,6 +785,7 @@ impl TiledPanes {
         pid: PaneId,
         mut new_pane: Box<dyn Pane>,
         client_id: ClientId,
+        size: Option<SplitSize>,
     ) {
         let active_pane_id = &self.active_panes.get(&client_id).unwrap();
         let mut full_pane_size = self
@@ -782,9 +806,31 @@ impl TiledPanes {
             }
         }
         let active_pane = self.panes.get_mut(active_pane_id).unwrap();
-        if let Some((left_winsize, right_winsize)) =
+        if let Some((mut left_winsize, mut right_winsize)) =
             split(SplitDirection::Vertical, &full_pane_size)
         {
+            if let Some(size) = size {
+                let total = full_pane_size.cols.as_usize();
+                let (new_cols, other_cols, new_dim) = sized_split(size, total, false);
+                left_winsize.cols.set_inner(other_cols);
+                right_winsize.x = left_winsize.x + other_cols;
+                right_winsize.cols.set_inner(new_cols);
+                if let Some((left_dim, right_dim)) = match size {
+                    SplitSize::Percent(percent) => percent_split_dimensions(
+                        percent,
+                        full_pane_size.cols.as_percent(),
+                        other_cols,
+                        new_cols,
+                        true,
+                    ),
+                    _ => None,
+                } {
+                    left_winsize.cols = left_dim;
+                    right_winsize.cols = right_dim;
+                } else {
+                    right_winsize.cols = new_dim;
+                }
+            }
             if active_pane.position_and_size().is_stacked() {
                 match StackedPanes::new_from_btreemap(&mut self.panes, &self.panes_to_hide)
                     .resize_panes_in_stack(&active_pane_id, left_winsize)
