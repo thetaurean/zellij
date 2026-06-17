@@ -1,6 +1,6 @@
 > **Fork notice — `thetaurean/zellij`**
 >
-> This is a fork of upstream [zellij](https://github.com/zellij-org/zellij) with three pane-targeting CLI primitives used by [gabi](https://github.com/thetaurean/gabi). The Homebrew formula installs the binary as **`zellij-gabi`** so it can coexist with a vanilla `zellij`. The patches are intended for eventual upstream PRs; this fork is the staging area while those are prepared.
+> This is a fork of upstream [zellij](https://github.com/zellij-org/zellij) with pane-targeting CLI primitives and tiled pane sizing used by [gabi](https://github.com/thetaurean/gabi). The Homebrew formula installs the binary as **`zellij-gabi`** so it can coexist with a vanilla `zellij`. The patches are intended for eventual upstream PRs; this fork is the staging area while those are prepared.
 >
 > ### Install
 >
@@ -16,6 +16,7 @@
 > | Patch | CLI surface | Why |
 > | --- | --- | --- |
 > | new-pane targeting | `zellij-gabi action new-pane --target-pane <name\|id> --direction <Left\|Right\|Up\|Down>` | Spawn anchored to a named pane, not the focused pane. Removes focus races in TUI orchestrators and avoids nesting inside vstacks. |
+> | fixed-size tiled new-pane | `zellij-gabi action new-pane --direction <Left\|Right\|Up\|Down> --width <N\|N%>` / `--height <N\|N%>` | Size tiled terminal/command spawns exactly along the split axis. Use `--height` for up/down and `--width` for left/right; composes with `--target-pane` and `--borderless`. Plugin tiled panes are not yet covered. |
 > | move-pane targeting | `zellij-gabi action move-pane <Left\|Right\|Up\|Down> --pane-id <source-id> --to-pane-id <dest-id>` | Structural re-parent to an explicit destination, not the focus-history geom swap that ships in upstream. |
 > | close-pane absorb | `zellij-gabi action close-pane --absorb-to <name\|id>` | Direct the freed space to an explicit surviving pane instead of the tree-left default. |
 >
@@ -24,6 +25,7 @@
 > | Tag | Upstream base | Patches included |
 > | --- | --- | --- |
 > | `v0.44.3-gabi.1` | `v0.44.3` | new-pane targeting, move-pane targeting, close-pane absorb |
+> | Unreleased | `v0.44.3` | fixed-size tiled new-pane |
 >
 > ### Upstream PR status
 >
