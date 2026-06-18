@@ -1745,10 +1745,7 @@ fn floating_pane_auto_centers_both_axes_with_only_size() {
 
 #[test]
 fn add_plugin_uses_carried_tiled_near_target_placement() {
-    let size = Size {
-        cols: 120,
-        rows: 20,
-    };
+    let size = Size { cols: 120, rows: 7 };
     let client_id = 1;
     let plugin_id = 42;
     let mut mock_screen = MockScreen::new(size);
@@ -1809,8 +1806,8 @@ fn add_plugin_uses_carried_tiled_near_target_placement() {
 
     assert_eq!(drawer_info.title, "drawer");
     assert_eq!(drawer_info.pane_y, 0, "drawer stays at the top");
-    assert_eq!(drawer_info.pane_rows, 18, "drawer shrinks to make room");
-    assert_eq!(plugin_info.pane_y, 18, "plugin pane lands below drawer");
+    assert_eq!(drawer_info.pane_rows, 5, "drawer shrinks to make room");
+    assert_eq!(plugin_info.pane_y, 5, "plugin pane lands below drawer");
     assert_eq!(
         plugin_info.pane_rows, 2,
         "plugin pane keeps requested fixed height"

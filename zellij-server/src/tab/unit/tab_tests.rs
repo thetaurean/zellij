@@ -565,6 +565,72 @@ fn new_pane_down_of_target_with_fixed_height_is_exact() {
 }
 
 #[test]
+fn new_pane_down_of_short_target_with_fixed_height_is_allowed() {
+    let size = Size { cols: 120, rows: 7 };
+    let mut tab = create_new_tab(size, true);
+
+    tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_1".to_string(),
+            direction: Direction::Down,
+            borderless: None,
+            size: Some(SplitSize::Fixed(2)),
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 0, 120, 5));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 5, 120, 2));
+}
+
+#[test]
+fn new_pane_down_of_short_target_with_fixed_height_above_status_row_is_allowed() {
+    let size = Size { cols: 80, rows: 24 };
+    let mut top_bar = TiledPaneLayout::default();
+    top_bar.split_size = Some(SplitSize::Fixed(1));
+    let main = TiledPaneLayout::default();
+    let mut drawer = TiledPaneLayout::default();
+    drawer.split_size = Some(SplitSize::Fixed(7));
+    let mut status_bar = TiledPaneLayout::default();
+    status_bar.split_size = Some(SplitSize::Fixed(1));
+
+    let mut layout = TiledPaneLayout::default();
+    layout.children_split_direction = SplitDirection::Horizontal;
+    layout.children = vec![top_bar, main, drawer, status_bar];
+    let mut tab = create_new_tab_with_layout(size, layout);
+
+    tab.new_pane(
+        PaneId::Terminal(4),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::TiledNearTarget {
+            target_pane: "terminal_2".to_string(),
+            direction: Direction::Down,
+            borderless: Some(true),
+            size: Some(SplitSize::Fixed(2)),
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(0)), (0, 0, 80, 1));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(1)), (0, 1, 80, 15));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(2)), (0, 16, 80, 5));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(4)), (0, 21, 80, 2));
+    assert_eq!(pane_geom(&tab, PaneId::Terminal(3)), (0, 23, 80, 1));
+}
+
+#[test]
 fn new_pane_down_of_target_with_percent_height() {
     let size = Size {
         cols: 120,

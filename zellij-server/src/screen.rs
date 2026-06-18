@@ -283,10 +283,12 @@ fn spawn_new_pane_in_tab(
         if let NewPanePlacement::TiledNearTarget {
             target_pane,
             direction,
+            size,
             ..
         } = &new_pane_placement
         {
-            if let Some(error_message) = tab.targeted_new_tiled_pane_error(target_pane, *direction)
+            if let Some(error_message) =
+                tab.targeted_new_tiled_pane_error(target_pane, *direction, *size)
             {
                 if let Some(completion) = completion_tx.as_mut() {
                     completion.set_error_message(error_message);

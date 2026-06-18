@@ -1842,7 +1842,7 @@ impl Tab {
             // `direction`. The `protected_pane_ids` are the panes occupying
             // the target's slot, which must survive any max-panes culling.
             let (_, protected_pane_ids) =
-                match self.resolve_insertable_tiled_target_pane_id(&target_pane, direction) {
+                match self.resolve_insertable_tiled_target_pane_id(&target_pane, direction, size) {
                     Ok(resolved) => resolved,
                     Err(error_message) => {
                         self.close_new_pane_with_error(
@@ -1868,7 +1868,7 @@ impl Tab {
             // target survives today, but an explicit re-bind catches any
             // future regression of that invariant and yields the post-close
             // target id to insert against.
-            match self.resolve_insertable_tiled_target_pane_id(&target_pane, direction) {
+            match self.resolve_insertable_tiled_target_pane_id(&target_pane, direction, size) {
                 Ok((post_close_target_id, _)) => Some(post_close_target_id),
                 Err(error_message) => {
                     self.close_new_pane_with_error(
@@ -2916,19 +2916,21 @@ impl Tab {
         &self,
         target_pane: &str,
         direction: Direction,
+        size: Option<SplitSize>,
     ) -> Option<String> {
-        self.resolve_insertable_tiled_target_pane_id(target_pane, direction)
+        self.resolve_insertable_tiled_target_pane_id(target_pane, direction, size)
             .err()
     }
     fn resolve_insertable_tiled_target_pane_id(
         &self,
         target_pane: &str,
         direction: Direction,
+        size: Option<SplitSize>,
     ) -> Result<(PaneId, HashSet<PaneId>), String> {
         let target_pane_id = self.resolve_tiled_target_pane_id(target_pane)?;
-        let Some(protected_pane_ids) = self
-            .tiled_panes
-            .pane_ids_in_insert_group_near_pane_id(target_pane_id, direction)
+        let Some(protected_pane_ids) =
+            self.tiled_panes
+                .pane_ids_in_insert_group_near_pane_id(target_pane_id, direction, size)
         else {
             return Err(format!(
                 "{ERR_CANNOT_INSERT_NEAR_TARGET_PREFIX} {:?}",

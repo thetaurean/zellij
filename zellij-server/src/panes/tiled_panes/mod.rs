@@ -105,6 +105,25 @@ fn percent_split_dimensions(
     Some((first_dim, second_dim))
 }
 
+fn split_fixed_dimension(direction: SplitDirection, rect: &PaneGeom) -> (PaneGeom, PaneGeom) {
+    let mut first_rect = *rect;
+    let mut second_rect = *rect;
+    match direction {
+        SplitDirection::Vertical => {
+            first_rect.cols = Dimension::fixed(rect.cols.as_usize());
+            second_rect.x = first_rect.x + 1;
+            second_rect.cols = first_rect.cols;
+        },
+        SplitDirection::Horizontal => {
+            first_rect.rows = Dimension::fixed(rect.rows.as_usize());
+            second_rect.y = first_rect.y + 1;
+            second_rect.rows = first_rect.rows;
+        },
+    }
+    second_rect.logical_position = None;
+    (first_rect, second_rect)
+}
+
 pub struct TiledPanes {
     pub panes: BTreeMap<PaneId, Box<dyn Pane>>,
     display_area: Rc<RefCell<Size>>,
@@ -872,7 +891,9 @@ impl TiledPanes {
     /// stack participates regardless of axis (the stack moves as a unit).
     ///
     /// Returns `None` when the bounding box of the group can't fit a split
-    /// (less than `2 * MIN_TERMINAL_*`) or when `target_pane_id` isn't present.
+    /// or when `target_pane_id` isn't present. Explicit sized inserts only
+    /// need enough cells for both sides to exist; auto-sized inserts keep the
+    /// normal terminal minimum.
     fn pane_group_split_near_pane_id(
         &self,
         target_pane_id: PaneId,
@@ -1008,21 +1029,42 @@ impl TiledPanes {
             Direction::Left | Direction::Right => SplitDirection::Vertical,
             Direction::Up | Direction::Down => SplitDirection::Horizontal,
         };
-        let has_enough_space = match split_direction {
-            SplitDirection::Vertical => group_geom.cols.as_usize() >= MIN_TERMINAL_WIDTH * 2,
-            SplitDirection::Horizontal => group_geom.rows.as_usize() >= MIN_TERMINAL_HEIGHT * 2,
+        // Explicit sizes can create status-strip panes smaller than the normal
+        // terminal minimum; only require enough cells for both sides to exist.
+        let has_enough_space = match (split_direction, size) {
+            (SplitDirection::Vertical, Some(_)) => group_geom.cols.as_usize() >= 2,
+            (SplitDirection::Horizontal, Some(_)) => group_geom.rows.as_usize() >= 2,
+            (SplitDirection::Vertical, None) => {
+                group_geom.cols.as_usize() >= MIN_TERMINAL_WIDTH * 2
+            },
+            (SplitDirection::Horizontal, None) => {
+                group_geom.rows.as_usize() >= MIN_TERMINAL_HEIGHT * 2
+            },
         };
         if !has_enough_space {
             return None;
         }
 
-        let Some((mut first_geom, mut second_geom)) = split(split_direction, &group_geom) else {
+        let Some((mut first_geom, mut second_geom)) =
+            split(split_direction, &group_geom).or_else(|| {
+                size.and_then(|_| match split_direction {
+                    SplitDirection::Vertical if group_geom.cols.is_fixed() => {
+                        Some(split_fixed_dimension(split_direction, &group_geom))
+                    },
+                    SplitDirection::Horizontal if group_geom.rows.is_fixed() => {
+                        Some(split_fixed_dimension(split_direction, &group_geom))
+                    },
+                    _ => None,
+                })
+            })
+        else {
             return None;
         };
         let new_is_second = matches!(direction, Direction::Right | Direction::Down);
         match split_direction {
             SplitDirection::Vertical => {
                 let total = group_geom.cols.as_usize();
+                let fixed_group_dimension = group_geom.cols.is_fixed();
                 let (first_cols, second_cols, new_dim) = match size {
                     Some(size) => {
                         let (new_cells, other_cells, dim) = sized_split(size, total, new_is_second);
@@ -1040,7 +1082,10 @@ impl TiledPanes {
                 first_geom.cols.set_inner(first_cols);
                 second_geom.x = first_geom.x + first_cols;
                 second_geom.cols.set_inner(second_cols);
-                if let Some((first_dim, second_dim)) = match size {
+                if fixed_group_dimension && size.is_some() {
+                    first_geom.cols = Dimension::fixed(first_cols);
+                    second_geom.cols = Dimension::fixed(second_cols);
+                } else if let Some((first_dim, second_dim)) = match size {
                     Some(SplitSize::Percent(percent)) => percent_split_dimensions(
                         percent,
                         group_geom.cols.as_percent(),
@@ -1062,6 +1107,7 @@ impl TiledPanes {
             },
             SplitDirection::Horizontal => {
                 let total = group_geom.rows.as_usize();
+                let fixed_group_dimension = group_geom.rows.is_fixed();
                 let (first_rows, second_rows, new_dim) = match size {
                     Some(size) => {
                         let (new_cells, other_cells, dim) = sized_split(size, total, new_is_second);
@@ -1079,7 +1125,10 @@ impl TiledPanes {
                 first_geom.rows.set_inner(first_rows);
                 second_geom.y = first_geom.y + first_rows;
                 second_geom.rows.set_inner(second_rows);
-                if let Some((first_dim, second_dim)) = match size {
+                if fixed_group_dimension && size.is_some() {
+                    first_geom.rows = Dimension::fixed(first_rows);
+                    second_geom.rows = Dimension::fixed(second_rows);
+                } else if let Some((first_dim, second_dim)) = match size {
                     Some(SplitSize::Percent(percent)) => percent_split_dimensions(
                         percent,
                         group_geom.rows.as_percent(),
@@ -1125,8 +1174,9 @@ impl TiledPanes {
         &self,
         target_pane_id: PaneId,
         direction: Direction,
+        size: Option<SplitSize>,
     ) -> Option<HashSet<PaneId>> {
-        self.pane_group_split_near_pane_id(target_pane_id, direction, None)
+        self.pane_group_split_near_pane_id(target_pane_id, direction, size)
             .map(|(pane_ids_and_geoms, _, _, _)| {
                 pane_ids_and_geoms
                     .into_iter()
@@ -1196,7 +1246,8 @@ impl TiledPanes {
         // Edge case: source already inside target's column-strip (Left/Right)
         // or already in target's slot (Up/Down). Either the move is a no-op
         // or the geometry collapses ambiguously. Bail out cleanly.
-        if let Some(group_ids) = self.pane_ids_in_insert_group_near_pane_id(target, direction) {
+        if let Some(group_ids) = self.pane_ids_in_insert_group_near_pane_id(target, direction, None)
+        {
             if group_ids.contains(&source) {
                 return Err(
                     "source and target are already in the same group; move would be a no-op"
