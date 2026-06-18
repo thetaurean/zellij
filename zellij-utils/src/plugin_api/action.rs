@@ -2579,7 +2579,7 @@ impl TryFrom<NewPanePlacement> for ProtobufNewPanePlacement {
                 Some(PlacementVariant::Tiled(ProtobufTiledPlacement {
                     direction,
                     borderless,
-                    size: size.and_then(|s| s.try_into().ok()),
+                    size: size.map(TryInto::try_into).transpose()?,
                 }))
             },
             NewPanePlacement::TiledNearTarget {
@@ -2592,7 +2592,7 @@ impl TryFrom<NewPanePlacement> for ProtobufNewPanePlacement {
                     target_pane,
                     direction: ProtobufResizeDirection::try_from(direction)? as i32,
                     borderless,
-                    size: size.and_then(|s| s.try_into().ok()),
+                    size: size.map(TryInto::try_into).transpose()?,
                 },
             )),
             NewPanePlacement::Floating(coords) => {
