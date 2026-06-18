@@ -1311,7 +1311,7 @@ pub(crate) fn route_action(
             pane_name: name,
             skip_cache,
             cwd,
-            placement: _placement,
+            placement,
             tab_id,
         } => {
             senders
@@ -1320,6 +1320,7 @@ pub(crate) fn route_action(
                     name,
                     skip_cache,
                     cwd,
+                    placement,
                     client_id,
                     Some(NotificationEnd::new(completion_tx)),
                     tab_id,

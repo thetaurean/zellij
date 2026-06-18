@@ -31,8 +31,8 @@ use wasm_bridge::WasmBridge;
 use zellij_utils::{
     data::{
         ClientInfo, CommandOrPlugin, Event, EventType, FloatingPaneCoordinates, InputMode,
-        LayoutInfo, LayoutWithError, MessageToPlugin, PermissionStatus, PermissionType,
-        PipeMessage, PipeSource, WebServerStatus,
+        LayoutInfo, LayoutWithError, MessageToPlugin, NewPanePlacement, PermissionStatus,
+        PermissionType, PipeMessage, PipeSource, WebServerStatus,
     },
     errors::{prelude::*, ContextType, PluginContext},
     input::{
@@ -71,6 +71,7 @@ pub enum PluginInstruction {
         bool,             // skip cache
         Option<bool>,     // should focus plugin
         Option<FloatingPaneCoordinates>,
+        Option<NewPanePlacement>,
         Option<NotificationEnd>, // completion signal
     ),
     LoadBackgroundPlugin(RunPluginOrAlias, ClientId),
@@ -363,6 +364,7 @@ pub(crate) fn plugin_thread_main(
                 skip_cache,
                 should_focus_plugin,
                 floating_pane_coordinates,
+                tiled_pane_placement,
                 completion_tx,
             ) => {
                 run_plugin_or_alias.populate_run_plugin_if_needed(&plugin_aliases);
@@ -396,6 +398,7 @@ pub(crate) fn plugin_thread_main(
                             cwd.clone(),
                             start_suppressed,
                             floating_pane_coordinates,
+                            tiled_pane_placement,
                             should_focus_plugin,
                             Some(client_id),
                             completion_tx,
@@ -475,6 +478,7 @@ pub(crate) fn plugin_thread_main(
                                                     None,
                                                     None,
                                                     start_suppressed,
+                                                    None,
                                                     None,
                                                     None,
                                                     None,
@@ -1446,6 +1450,7 @@ fn load_background_plugin(
                 pane_id_to_replace,
                 cwd,
                 start_suppressed,
+                None,
                 None,
                 None,
                 Some(client_id),

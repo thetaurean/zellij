@@ -619,6 +619,7 @@ pub enum ScreenInstruction {
         Option<String>,
         bool,
         Option<PathBuf>,
+        Option<NewPanePlacement>,
         ClientId,
         Option<NotificationEnd>,
         Option<usize>, // tab_id
@@ -660,6 +661,7 @@ pub enum ScreenInstruction {
         Option<PathBuf>, // cwd
         bool,            // start suppressed
         Option<FloatingPaneCoordinates>,
+        Option<NewPanePlacement>,
         Option<bool>, // should focus plugin
         Option<ClientId>,
         Option<NotificationEnd>, // completion signal
@@ -7955,6 +7957,7 @@ pub(crate) fn screen_thread_main(
                 pane_title,
                 skip_cache,
                 cwd,
+                tiled_pane_placement,
                 client_id,
                 completion_tx,
                 explicit_tab_id,
@@ -7981,6 +7984,7 @@ pub(crate) fn screen_thread_main(
                         cwd,
                         None,
                         None,
+                        tiled_pane_placement,
                         completion_tx,
                     ))?;
             },
@@ -8018,6 +8022,7 @@ pub(crate) fn screen_thread_main(
                                 cwd,
                                 None,
                                 floating_pane_coordinates,
+                                None,
                                 completion_tx,
                             ))?;
                     },
@@ -8062,6 +8067,7 @@ pub(crate) fn screen_thread_main(
                                 None,
                                 None,
                                 None,
+                                None,
                                 completion_tx,
                             ))?;
                     },
@@ -8101,6 +8107,7 @@ pub(crate) fn screen_thread_main(
                 cwd,
                 start_suppressed,
                 floating_pane_coordinates,
+                tiled_pane_placement,
                 should_focus_plugin,
                 client_id,
                 mut completion_tx,
@@ -8115,11 +8122,14 @@ pub(crate) fn screen_thread_main(
                     );
                 }
                 if should_be_tiled {
-                    new_pane_placement = NewPanePlacement::Tiled {
-                        direction: None,
-                        borderless: None,
-                        size: None,
-                    };
+                    new_pane_placement =
+                        tiled_pane_placement
+                            .clone()
+                            .unwrap_or(NewPanePlacement::Tiled {
+                                direction: None,
+                                borderless: None,
+                                size: None,
+                            });
                 }
                 if should_be_in_place {
                     new_pane_placement = NewPanePlacement::with_pane_id_to_replace(
@@ -8140,6 +8150,7 @@ pub(crate) fn screen_thread_main(
                         cwd,
                         start_suppressed,
                         floating_pane_coordinates,
+                        tiled_pane_placement,
                         should_focus_plugin,
                         client_id,
                         completion_tx,
@@ -8293,6 +8304,7 @@ pub(crate) fn screen_thread_main(
                                     None,
                                     None,
                                     None,
+                                    None,
                                     completion_tx,
                                 ))?;
                         },
@@ -8348,6 +8360,7 @@ pub(crate) fn screen_thread_main(
                                         None,
                                         None,
                                         None,
+                                        None,
                                         completion_tx,
                                     ))?;
                             }
@@ -8393,6 +8406,7 @@ pub(crate) fn screen_thread_main(
                                     cwd,
                                     None,
                                     None,
+                                    None,
                                     completion_tx,
                                 ))?;
                         },
@@ -8435,6 +8449,7 @@ pub(crate) fn screen_thread_main(
                                     Size::default(),
                                     skip_cache,
                                     cwd,
+                                    None,
                                     None,
                                     None,
                                     completion_tx,

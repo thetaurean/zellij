@@ -129,6 +129,7 @@ pub enum PtyInstruction {
         Option<PathBuf>, // if Some, will not fill cwd but just forward the message
         Option<bool>,    // should focus plugin
         Option<FloatingPaneCoordinates>,
+        Option<NewPanePlacement>,
         Option<NotificationEnd>,
     ),
     ListClientsMetadata(SessionLayoutMetadata, ClientId, Option<NotificationEnd>),
@@ -839,6 +840,7 @@ pub(crate) fn pty_thread_main(mut pty: Pty, layout: Box<Layout>) -> Result<()> {
                 cwd,
                 should_focus_plugin,
                 floating_pane_coordinates,
+                tiled_pane_placement,
                 completion_tx,
             ) => {
                 pty.fill_plugin_cwd(
@@ -855,6 +857,7 @@ pub(crate) fn pty_thread_main(mut pty: Pty, layout: Box<Layout>) -> Result<()> {
                     cwd,
                     should_focus_plugin,
                     floating_pane_coordinates,
+                    tiled_pane_placement,
                     completion_tx,
                 )?;
             },
@@ -2001,6 +2004,7 @@ impl Pty {
         cwd: Option<PathBuf>,
         should_focus_plugin: Option<bool>,
         floating_pane_coordinates: Option<FloatingPaneCoordinates>,
+        tiled_pane_placement: Option<NewPanePlacement>,
         completion_tx: Option<NotificationEnd>,
     ) -> Result<()> {
         let get_focused_cwd = || {
@@ -2051,6 +2055,7 @@ impl Pty {
             skip_cache,
             should_focus_plugin,
             floating_pane_coordinates,
+            tiled_pane_placement,
             completion_tx,
         ))?;
         Ok(())

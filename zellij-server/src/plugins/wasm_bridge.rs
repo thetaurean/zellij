@@ -1887,6 +1887,7 @@ impl WasmBridge {
                                 cwd,
                                 start_suppressed,
                                 floating_pane_coordinates,
+                                None,
                                 Some(should_focus),
                                 Some(client_id),
                                 None,

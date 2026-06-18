@@ -1744,6 +1744,84 @@ fn floating_pane_auto_centers_both_axes_with_only_size() {
 }
 
 #[test]
+fn add_plugin_uses_carried_tiled_near_target_placement() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let client_id = 1;
+    let plugin_id = 42;
+    let mut mock_screen = MockScreen::new(size);
+    let screen_thread = mock_screen.run(None, vec![]);
+
+    let _ = mock_screen.to_screen.send(ScreenInstruction::RenamePane(
+        PaneId::Terminal(0),
+        b"drawer".to_vec(),
+        None,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    let _ = mock_screen.to_screen.send(ScreenInstruction::AddPlugin(
+        Some(false),
+        false,
+        false,
+        RunPluginOrAlias::from_url("file:/path/to/fake/plugin", &None, None, None).unwrap(),
+        Some("drawer-plugin".to_owned()),
+        Some(0),
+        plugin_id,
+        None,
+        None,
+        false,
+        None,
+        Some(NewPanePlacement::TiledNearTarget {
+            target_pane: "drawer".to_owned(),
+            direction: Direction::Down,
+            borderless: Some(true),
+            size: Some(PercentOrFixed::Fixed(2).into()),
+        }),
+        Some(true),
+        Some(client_id),
+        None,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    let (drawer_sender, drawer_receiver) = channels::bounded(1);
+    let _ = mock_screen.to_screen.send(ScreenInstruction::GetPaneInfo {
+        pane_id: PaneId::Terminal(0),
+        response_channel: drawer_sender,
+    });
+    let drawer_info = drawer_receiver
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .unwrap()
+        .expect("drawer pane info");
+
+    let (plugin_sender, plugin_receiver) = channels::bounded(1);
+    let _ = mock_screen.to_screen.send(ScreenInstruction::GetPaneInfo {
+        pane_id: PaneId::Plugin(plugin_id),
+        response_channel: plugin_sender,
+    });
+    let plugin_info = plugin_receiver
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .unwrap()
+        .expect("plugin pane info");
+
+    mock_screen.teardown(vec![screen_thread]);
+
+    assert_eq!(drawer_info.title, "drawer");
+    assert_eq!(drawer_info.pane_y, 0, "drawer stays at the top");
+    assert_eq!(drawer_info.pane_rows, 18, "drawer shrinks to make room");
+    assert_eq!(plugin_info.pane_y, 18, "plugin pane lands below drawer");
+    assert_eq!(
+        plugin_info.pane_rows, 2,
+        "plugin pane keeps requested fixed height"
+    );
+    assert_eq!(
+        plugin_info.pane_columns, 120,
+        "plugin pane spans drawer width"
+    );
+}
+
+#[test]
 fn floating_pane_respects_explicit_coordinates_with_size() {
     let size = Size {
         cols: 120,
