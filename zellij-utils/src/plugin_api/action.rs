@@ -98,6 +98,26 @@ use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::path::PathBuf;
 
+fn optional_tiled_plugin_placement_from_api(
+    placement: Option<ProtobufNewPanePlacement>,
+) -> Result<Option<NewPanePlacement>, &'static str> {
+    match placement {
+        Some(placement) => {
+            let placement = placement.try_into()?;
+            match placement {
+                NewPanePlacement::Tiled {
+                    direction: None,
+                    borderless: None,
+                    size: None,
+                } => Ok(Some(placement)),
+                NewPanePlacement::TiledNearTarget { .. } => Ok(Some(placement)),
+                _ => Err("NewTiledPluginPane received non-tiled placement"),
+            }
+        },
+        None => Ok(None),
+    }
+}
+
 impl TryFrom<ProtobufAction> for Action {
     type Error = &'static str;
     fn try_from(protobuf_action: ProtobufAction) -> Result<Self, &'static str> {
@@ -833,7 +853,7 @@ impl TryFrom<ProtobufAction> for Action {
                             pane_name,
                             skip_cache: skip_plugin_cache,
                             cwd: None,
-                            placement: payload.placement.map(TryInto::try_into).transpose()?,
+                            placement: optional_tiled_plugin_placement_from_api(payload.placement)?,
                             tab_id: None,
                         })
                     },
@@ -1731,17 +1751,33 @@ impl TryFrom<Action> for ProtobufAction {
                 cwd: _cwd,
                 placement,
                 ..
-            } => Ok(ProtobufAction {
-                name: ProtobufActionName::NewTiledPluginPane as i32,
-                optional_payload: Some(OptionalPayload::NewTiledPluginPanePayload(
-                    NewPluginPanePayload {
-                        plugin_url: run_plugin.location_string(),
-                        pane_name,
-                        skip_plugin_cache,
-                        placement: placement.map(TryInto::try_into).transpose()?,
+            } => {
+                let placement = match placement {
+                    Some(
+                        placement @ NewPanePlacement::Tiled {
+                            direction: None,
+                            borderless: None,
+                            size: None,
+                        },
+                    ) => Some(placement.try_into()?),
+                    Some(placement @ NewPanePlacement::TiledNearTarget { .. }) => {
+                        Some(placement.try_into()?)
                     },
-                )),
-            }),
+                    Some(_) => return Err("NewTiledPluginPane received non-tiled placement"),
+                    None => None,
+                };
+                Ok(ProtobufAction {
+                    name: ProtobufActionName::NewTiledPluginPane as i32,
+                    optional_payload: Some(OptionalPayload::NewTiledPluginPanePayload(
+                        NewPluginPanePayload {
+                            plugin_url: run_plugin.location_string(),
+                            pane_name,
+                            skip_plugin_cache,
+                            placement,
+                        },
+                    )),
+                })
+            },
             Action::NewFloatingPluginPane {
                 plugin: run_plugin,
                 pane_name,
@@ -2484,14 +2520,16 @@ impl TryFrom<ProtobufNewPanePlacement> for NewPanePlacement {
                     size: tiled.size.map(TryInto::try_into).transpose()?,
                 })
             },
-            Some(PlacementVariant::TiledNearTarget(tiled)) => Ok(NewPanePlacement::TiledNearTarget {
-                target_pane: tiled.target_pane,
-                direction: ProtobufResizeDirection::from_i32(tiled.direction)
-                    .and_then(|d| d.try_into().ok())
-                    .ok_or("Malformed TiledNearTarget direction")?,
-                borderless: tiled.borderless,
-                size: tiled.size.map(TryInto::try_into).transpose()?,
-            }),
+            Some(PlacementVariant::TiledNearTarget(tiled)) => {
+                Ok(NewPanePlacement::TiledNearTarget {
+                    target_pane: tiled.target_pane,
+                    direction: ProtobufResizeDirection::from_i32(tiled.direction)
+                        .and_then(|d| d.try_into().ok())
+                        .ok_or("Malformed TiledNearTarget direction")?,
+                    borderless: tiled.borderless,
+                    size: tiled.size.map(TryInto::try_into).transpose()?,
+                })
+            },
             Some(PlacementVariant::Floating(floating)) => {
                 let coords = floating.coordinates.and_then(|c| c.try_into().ok());
                 Ok(NewPanePlacement::Floating(coords))
@@ -3267,5 +3305,146 @@ impl TryFrom<SwapFloatingLayout> for ProtobufSwapFloatingLayout {
             constraint_map,
             name: internal.1,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugin_api::generated_api::api::action::new_pane_placement::PlacementVariant;
+    use crate::plugin_api::generated_api::api::action::split_size::SplitSizeVariant;
+
+    fn tiled_plugin_action(placement: Option<NewPanePlacement>) -> Action {
+        Action::NewTiledPluginPane {
+            plugin: RunPluginOrAlias::RunPlugin(RunPlugin {
+                location: RunPluginLocation::parse("file:/path/to/fake/plugin", None).unwrap(),
+                _allow_exec_host_cmd: false,
+                configuration: PluginUserConfiguration::default(),
+                ..Default::default()
+            }),
+            pane_name: Some("drawer-tabs".to_owned()),
+            skip_cache: false,
+            cwd: None,
+            placement,
+            tab_id: None,
+        }
+    }
+
+    #[test]
+    fn new_tiled_plugin_pane_roundtrips_tiled_near_target_placement() {
+        let action = tiled_plugin_action(Some(NewPanePlacement::TiledNearTarget {
+            target_pane: "drawer".to_owned(),
+            direction: Direction::Down,
+            borderless: Some(true),
+            size: Some(SplitSize::Fixed(2)),
+        }));
+
+        let protobuf_action: ProtobufAction = action.clone().try_into().unwrap();
+        let roundtripped = Action::try_from(protobuf_action).unwrap();
+
+        assert_eq!(roundtripped, action);
+    }
+
+    #[test]
+    fn new_tiled_plugin_pane_roundtrips_without_placement() {
+        let action = tiled_plugin_action(None);
+
+        let protobuf_action: ProtobufAction = action.clone().try_into().unwrap();
+        let roundtripped = Action::try_from(protobuf_action).unwrap();
+
+        assert_eq!(roundtripped, action);
+    }
+
+    #[test]
+    fn new_tiled_plugin_pane_rejects_non_tiled_placement_when_encoding() {
+        let action = tiled_plugin_action(Some(NewPanePlacement::Floating(None)));
+
+        assert!(ProtobufAction::try_from(action).is_err());
+    }
+
+    #[test]
+    fn new_tiled_plugin_pane_rejects_sized_tiled_placement_when_encoding() {
+        let action = tiled_plugin_action(Some(NewPanePlacement::Tiled {
+            direction: Some(Direction::Down),
+            borderless: Some(true),
+            size: Some(SplitSize::Fixed(2)),
+        }));
+
+        assert!(ProtobufAction::try_from(action).is_err());
+    }
+
+    #[test]
+    fn new_tiled_plugin_pane_rejects_non_tiled_placement_when_decoding() {
+        let protobuf_action = ProtobufAction {
+            name: ProtobufActionName::NewTiledPluginPane as i32,
+            optional_payload: Some(OptionalPayload::NewTiledPluginPanePayload(
+                NewPluginPanePayload {
+                    plugin_url: "file:/path/to/fake/plugin".to_owned(),
+                    pane_name: Some("drawer-tabs".to_owned()),
+                    skip_plugin_cache: false,
+                    placement: Some(ProtobufNewPanePlacement {
+                        placement_variant: Some(PlacementVariant::Floating(
+                            ProtobufFloatingPlacement { coordinates: None },
+                        )),
+                    }),
+                },
+            )),
+        };
+
+        assert!(Action::try_from(protobuf_action).is_err());
+    }
+
+    #[test]
+    fn new_tiled_plugin_pane_rejects_sized_tiled_placement_when_decoding() {
+        let protobuf_action = ProtobufAction {
+            name: ProtobufActionName::NewTiledPluginPane as i32,
+            optional_payload: Some(OptionalPayload::NewTiledPluginPanePayload(
+                NewPluginPanePayload {
+                    plugin_url: "file:/path/to/fake/plugin".to_owned(),
+                    pane_name: Some("drawer-tabs".to_owned()),
+                    skip_plugin_cache: false,
+                    placement: Some(ProtobufNewPanePlacement {
+                        placement_variant: Some(PlacementVariant::Tiled(ProtobufTiledPlacement {
+                            direction: Some(ProtobufResizeDirection::Down as i32),
+                            borderless: Some(true),
+                            size: Some(ProtobufSplitSize {
+                                split_size_variant: Some(SplitSizeVariant::Fixed(2)),
+                            }),
+                        })),
+                    }),
+                },
+            )),
+        };
+
+        assert!(Action::try_from(protobuf_action).is_err());
+    }
+
+    #[test]
+    fn new_tiled_plugin_pane_protobuf_contains_fixed_size() {
+        let action = tiled_plugin_action(Some(NewPanePlacement::TiledNearTarget {
+            target_pane: "drawer".to_owned(),
+            direction: Direction::Down,
+            borderless: Some(true),
+            size: Some(SplitSize::Fixed(2)),
+        }));
+
+        let protobuf_action: ProtobufAction = action.try_into().unwrap();
+        let OptionalPayload::NewTiledPluginPanePayload(payload) =
+            protobuf_action.optional_payload.unwrap()
+        else {
+            panic!("expected NewTiledPluginPane payload");
+        };
+        let placement = payload.placement.unwrap();
+        let Some(PlacementVariant::TiledNearTarget(placement)) = placement.placement_variant else {
+            panic!("expected tiled-near-target placement");
+        };
+        let Some(ProtobufSplitSize {
+            split_size_variant: Some(SplitSizeVariant::Fixed(fixed_size)),
+        }) = placement.size
+        else {
+            panic!("expected fixed split size");
+        };
+
+        assert_eq!(fixed_size, 2);
     }
 }

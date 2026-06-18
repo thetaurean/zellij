@@ -2362,6 +2362,27 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
             },
             ActionType::QueryTabNames(_) => Ok(crate::input::actions::Action::QueryTabNames),
             ActionType::NewTiledPluginPane(new_tiled_plugin_action) => {
+                let placement = match new_tiled_plugin_action.placement {
+                    Some(placement) => {
+                        let placement = placement.try_into()?;
+                        match placement {
+                            crate::data::NewPanePlacement::Tiled {
+                                direction: None,
+                                borderless: None,
+                                size: None,
+                            } => Some(placement),
+                            crate::data::NewPanePlacement::TiledNearTarget { .. } => {
+                                Some(placement)
+                            },
+                            _ => {
+                                return Err(anyhow!(
+                                    "new_tiled_plugin_pane placement must be plain tiled or tiled_near_target"
+                                ));
+                            },
+                        }
+                    },
+                    None => None,
+                };
                 Ok(crate::input::actions::Action::NewTiledPluginPane {
                     plugin: new_tiled_plugin_action
                         .plugin
@@ -2370,10 +2391,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                     pane_name: new_tiled_plugin_action.pane_name,
                     skip_cache: new_tiled_plugin_action.skip_cache,
                     cwd: new_tiled_plugin_action.cwd.map(PathBuf::from),
-                    placement: new_tiled_plugin_action
-                        .placement
-                        .map(TryInto::try_into)
-                        .transpose()?,
+                    placement,
                     tab_id: new_tiled_plugin_action.tab_id.map(|t| t as usize),
                 })
             },

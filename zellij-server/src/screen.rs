@@ -8167,13 +8167,10 @@ pub(crate) fn screen_thread_main(
                 });
                 let run_plugin = Run::Plugin(run_plugin_or_alias);
 
-                // Set affected pane ID for CLI client output
-                if let Some(ref mut completion) = completion_tx {
-                    completion.set_affected_pane_id(PaneId::Plugin(plugin_id));
-                }
-
+                let mut plugin_pane_was_created = false;
+                let mut should_unload_uncreated_plugin = false;
                 if should_be_in_place {
-                    if let Some(pane_id_to_replace) = pane_id_to_replace {
+                    let replace_result = if let Some(pane_id_to_replace) = pane_id_to_replace {
                         let client_tab_index_or_pane_id =
                             ClientTabIndexOrPaneId::PaneId(pane_id_to_replace);
                         screen.replace_pane(
@@ -8183,7 +8180,7 @@ pub(crate) fn screen_thread_main(
                             Some(pane_title),
                             close_replaced_pane,
                             client_tab_index_or_pane_id,
-                        )?;
+                        )
                     } else if let Some(client_id) = client_id {
                         let client_tab_index_or_pane_id =
                             ClientTabIndexOrPaneId::ClientId(client_id);
@@ -8194,42 +8191,125 @@ pub(crate) fn screen_thread_main(
                             Some(pane_title),
                             close_replaced_pane,
                             client_tab_index_or_pane_id,
-                        )?;
-                    } else {
-                        log::error!("Must have pane id to replace or connected client_id if replacing a pane");
-                    }
-                } else if let Some(client_id) = client_id {
-                    active_tab_and_connected_client_id!(screen, client_id, |active_tab: &mut Tab, _client_id: ClientId| {
-                        active_tab.new_pane(
-                            PaneId::Plugin(plugin_id),
-                            Some(pane_title),
-                            Some(run_plugin),
-                            start_suppressed,
-                            should_focus_plugin.unwrap_or(true),
-                            new_pane_placement,
-                            Some(client_id),
-                            None,
                         )
-                    }, ?);
+                    } else {
+                        let error_message =
+                            "Must have pane id to replace or connected client_id if replacing a pane"
+                                .to_owned();
+                        log::error!("{}", error_message);
+                        if let Some(completion) = completion_tx.as_mut() {
+                            completion.set_error_message(error_message);
+                        }
+                        should_unload_uncreated_plugin = true;
+                        Ok(())
+                    };
+                    match replace_result {
+                        Ok(()) if !should_unload_uncreated_plugin => {
+                            plugin_pane_was_created = true;
+                        },
+                        Ok(()) => {},
+                        Err(error) => {
+                            if let Some(completion) = completion_tx.as_mut() {
+                                completion.set_error_message(error.to_string());
+                            }
+                            should_unload_uncreated_plugin = true;
+                            Err::<(), _>(error).non_fatal();
+                        },
+                    };
+                } else if let Some(client_id) = client_id {
+                    let connected_client_id = if screen.active_tab_ids.contains_key(&client_id) {
+                        Some(client_id)
+                    } else {
+                        screen.get_first_client_id()
+                    };
+                    if let Some(connected_client_id) = connected_client_id {
+                        match screen.get_active_tab_mut(connected_client_id) {
+                            Ok(active_tab) => match spawn_new_pane_in_tab(
+                                active_tab,
+                                PaneId::Plugin(plugin_id),
+                                Some(pane_title),
+                                Some(run_plugin),
+                                new_pane_placement,
+                                None,
+                                start_suppressed,
+                                should_focus_plugin.unwrap_or(true),
+                                Some(connected_client_id),
+                                false,
+                                &mut completion_tx,
+                            ) {
+                                SpawnOutcome::Created => plugin_pane_was_created = true,
+                                SpawnOutcome::Skipped => should_unload_uncreated_plugin = true,
+                                SpawnOutcome::Failed(error) => {
+                                    should_unload_uncreated_plugin = true;
+                                    Err::<(), _>(error).non_fatal();
+                                },
+                            },
+                            Err(error) => {
+                                if let Some(completion) = completion_tx.as_mut() {
+                                    completion.set_error_message(error.to_string());
+                                }
+                                should_unload_uncreated_plugin = true;
+                                Err::<(), _>(error).non_fatal();
+                            },
+                        }
+                    } else {
+                        let error_message = "No client ids in screen found".to_owned();
+                        log::error!("{}", error_message);
+                        if let Some(completion) = completion_tx.as_mut() {
+                            completion.set_error_message(error_message);
+                        }
+                        should_unload_uncreated_plugin = true;
+                    }
                 } else if let Some(active_tab) =
                     tab_index.and_then(|tab_index| screen.tabs.get_mut(&tab_index))
                 {
-                    active_tab.new_pane(
+                    match spawn_new_pane_in_tab(
+                        active_tab,
                         PaneId::Plugin(plugin_id),
                         Some(pane_title),
                         Some(run_plugin),
-                        start_suppressed,
-                        should_focus_plugin.unwrap_or(true),
                         new_pane_placement,
                         None,
+                        start_suppressed,
+                        should_focus_plugin.unwrap_or(true),
                         None,
-                    )?;
+                        false,
+                        &mut completion_tx,
+                    ) {
+                        SpawnOutcome::Created => plugin_pane_was_created = true,
+                        SpawnOutcome::Skipped => should_unload_uncreated_plugin = true,
+                        SpawnOutcome::Failed(error) => {
+                            should_unload_uncreated_plugin = true;
+                            Err::<(), _>(error).non_fatal();
+                        },
+                    }
                 } else {
-                    log::error!("Tab index not found: {:?}", tab_index);
+                    let error_message = format!("Tab index not found: {:?}", tab_index);
+                    log::error!("{}", error_message);
+                    if let Some(completion) = completion_tx.as_mut() {
+                        completion.set_error_message(error_message);
+                    }
+                    should_unload_uncreated_plugin = true;
                 }
-                if let Some(loading_indication) = plugin_loading_message_cache.remove(&plugin_id) {
-                    screen.update_plugin_loading_stage(plugin_id, loading_indication);
-                    screen.render(None)?;
+                if should_unload_uncreated_plugin {
+                    plugin_loading_message_cache.remove(&plugin_id);
+                    screen
+                        .bus
+                        .senders
+                        .send_to_plugin(PluginInstruction::Unload(plugin_id))?;
+                }
+                if plugin_pane_was_created {
+                    if let Some(ref mut completion) = completion_tx {
+                        completion.set_affected_pane_id(PaneId::Plugin(plugin_id));
+                    }
+                }
+                if plugin_pane_was_created {
+                    if let Some(loading_indication) =
+                        plugin_loading_message_cache.remove(&plugin_id)
+                    {
+                        screen.update_plugin_loading_stage(plugin_id, loading_indication);
+                        screen.render(None)?;
+                    }
                 }
                 screen.log_and_report_session_state()?;
             },

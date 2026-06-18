@@ -48,6 +48,63 @@ fn new_tiled_pane_rejects_non_tiled_placement() {
 }
 
 #[test]
+fn new_tiled_plugin_pane_rejects_non_tiled_placement() {
+    use crate::client_server_contract::client_server_contract as protobuf;
+
+    let protobuf_action = protobuf::Action {
+        action_type: Some(protobuf::action::ActionType::NewTiledPluginPane(
+            protobuf::NewTiledPluginPaneAction {
+                plugin: Some(RunPluginOrAlias::Alias(PluginAlias::default()).into()),
+                pane_name: None,
+                skip_cache: false,
+                cwd: None,
+                tab_id: None,
+                placement: Some(protobuf::NewPanePlacement {
+                    placement_type: Some(protobuf::new_pane_placement::PlacementType::Floating(
+                        protobuf::FloatingPaneCoordinates::default(),
+                    )),
+                }),
+            },
+        )),
+    };
+
+    assert!(Action::try_from(protobuf_action).is_err());
+}
+
+#[test]
+fn new_tiled_plugin_pane_rejects_sized_tiled_placement_without_target() {
+    use crate::client_server_contract::client_server_contract as protobuf;
+    use protobuf::split_size::SizeType;
+
+    let protobuf_action = protobuf::Action {
+        action_type: Some(protobuf::action::ActionType::NewTiledPluginPane(
+            protobuf::NewTiledPluginPaneAction {
+                plugin: Some(RunPluginOrAlias::Alias(PluginAlias::default()).into()),
+                pane_name: None,
+                skip_cache: false,
+                cwd: None,
+                tab_id: None,
+                placement: Some(protobuf::NewPanePlacement {
+                    placement_type: Some(
+                        protobuf::new_pane_placement::PlacementType::TiledWithOptions(
+                            protobuf::TiledPlacement {
+                                direction: Some(protobuf::Direction::Down as i32),
+                                borderless: Some(true),
+                                size: Some(protobuf::SplitSize {
+                                    size_type: Some(SizeType::Fixed(2)),
+                                }),
+                            },
+                        ),
+                    ),
+                }),
+            },
+        )),
+    };
+
+    assert!(Action::try_from(protobuf_action).is_err());
+}
+
+#[test]
 fn close_focus_absorbing_to_roundtrips_through_client_ipc() {
     test_client_roundtrip!(ClientToServerMsg::Action {
         action: Action::CloseFocusAbsorbingTo {

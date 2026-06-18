@@ -3,7 +3,7 @@ use crate::panes::PaneId;
 use crate::{
     channels::SenderWithContext,
     os_input_output::ServerOsApi,
-    route::{route_action, ActionCompletionResult},
+    route::{route_action, ActionCompletionResult, NotificationEnd},
     thread_bus::Bus,
     ClientId, ServerInstruction, SessionMetaData, ThreadSenders,
 };
@@ -1819,6 +1819,82 @@ fn add_plugin_uses_carried_tiled_near_target_placement() {
         plugin_info.pane_columns, 120,
         "plugin pane spans drawer width"
     );
+}
+
+#[test]
+fn add_plugin_with_missing_tiled_target_reports_error_without_pane_id() {
+    let size = Size {
+        cols: 120,
+        rows: 20,
+    };
+    let client_id = 1;
+    let plugin_id = 43;
+    let mut mock_screen = MockScreen::new(size);
+    let received_plugin_instructions = Arc::new(Mutex::new(vec![]));
+    let plugin_receiver = mock_screen.plugin_receiver.take().unwrap();
+    let plugin_thread = log_actions_in_thread!(
+        received_plugin_instructions,
+        PluginInstruction::Exit,
+        plugin_receiver
+    );
+    let screen_thread = mock_screen.run(None, vec![]);
+    let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+
+    let _ = mock_screen.to_screen.send(ScreenInstruction::AddPlugin(
+        Some(false),
+        false,
+        false,
+        RunPluginOrAlias::from_url("file:/path/to/fake/plugin", &None, None, None).unwrap(),
+        Some("drawer-plugin".to_owned()),
+        Some(0),
+        plugin_id,
+        None,
+        None,
+        false,
+        None,
+        Some(NewPanePlacement::TiledNearTarget {
+            target_pane: "missing-drawer".to_owned(),
+            direction: Direction::Down,
+            borderless: Some(true),
+            size: Some(PercentOrFixed::Fixed(2).into()),
+        }),
+        Some(true),
+        Some(client_id),
+        Some(NotificationEnd::new(completion_tx)),
+    ));
+
+    let completion = completion_rx.blocking_recv().unwrap();
+    let (plugin_sender, plugin_receiver) = channels::bounded(1);
+    let _ = mock_screen.to_screen.send(ScreenInstruction::GetPaneInfo {
+        pane_id: PaneId::Plugin(plugin_id),
+        response_channel: plugin_sender,
+    });
+    let plugin_info = plugin_receiver
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .unwrap();
+
+    mock_screen.teardown(vec![plugin_thread, screen_thread]);
+    let received_plugin_instructions = received_plugin_instructions.lock().unwrap();
+    let unload_sent = received_plugin_instructions.iter().any(
+        |instruction| matches!(instruction, PluginInstruction::Unload(id) if *id == plugin_id),
+    );
+
+    assert!(
+        completion
+            .error_message
+            .as_deref()
+            .is_some_and(|message| message.contains("Could not find tiled target pane")),
+        "missing target should be reported through completion"
+    );
+    assert_eq!(
+        completion.affected_pane_id, None,
+        "missing target must not print plugin_<id> to CLI"
+    );
+    assert!(
+        plugin_info.is_none(),
+        "plugin pane should not be inserted when target is missing"
+    );
+    assert!(unload_sent, "skipped plugin load should be unloaded");
 }
 
 #[test]
