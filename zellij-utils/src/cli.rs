@@ -915,7 +915,7 @@ pub enum CliAction {
         #[clap(last(true))]
         command: Vec<String>,
 
-        #[clap(short, long, conflicts_with("command"), conflicts_with("direction"))]
+        #[clap(short, long, conflicts_with("command"))]
         plugin: Option<String>,
 
         /// Change the working directory of the new pane
@@ -1707,6 +1707,16 @@ mod tests {
         }
     }
 
+    fn parse_action(args: &[&str]) -> CliAction {
+        let mut full_args = vec!["zellij", "action"];
+        full_args.extend_from_slice(args);
+        let cli = CliArgs::try_parse_from(full_args).unwrap();
+        match cli.command {
+            Some(Command::Action(action)) => *action,
+            other => panic!("Expected Action, got {:?}", other),
+        }
+    }
+
     #[test]
     fn subscribe_scrollback_bare_flag() {
         let s = parse_subscribe(&["subscribe", "--pane-id", "terminal_1", "--scrollback"]);
@@ -1876,6 +1886,42 @@ mod tests {
             } else {
                 panic!("expected Action command");
             }
+        }
+    }
+
+    #[test]
+    fn new_pane_plugin_accepts_direction_when_targeted() {
+        let action = parse_action(&[
+            "new-pane",
+            "--plugin",
+            "zellij:strider",
+            "--target-pane",
+            "drawer",
+            "--direction",
+            "down",
+            "--height",
+            "2",
+            "--borderless",
+            "true",
+            "--configuration",
+            "plugin_dir=/tmp/plugin-dir",
+        ]);
+        match action {
+            CliAction::NewPane {
+                plugin,
+                target_pane,
+                direction,
+                height,
+                borderless,
+                ..
+            } => {
+                assert_eq!(plugin.as_deref(), Some("zellij:strider"));
+                assert_eq!(target_pane.as_deref(), Some("drawer"));
+                assert_eq!(direction, Some(Direction::Down));
+                assert_eq!(height.as_deref(), Some("2"));
+                assert_eq!(borderless, Some(true));
+            },
+            other => panic!("expected NewPane action, got {:?}", other),
         }
     }
 }
