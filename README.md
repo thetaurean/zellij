@@ -16,7 +16,8 @@
 > | Patch | CLI surface | Why |
 > | --- | --- | --- |
 > | new-pane targeting | `zellij-gabi action new-pane --target-pane <name\|id> --direction <Left\|Right\|Up\|Down>` | Spawn anchored to a named pane, not the focused pane. Removes focus races in TUI orchestrators and avoids nesting inside vstacks. |
-> | fixed-size tiled new-pane | `zellij-gabi action new-pane --direction <Left\|Right\|Up\|Down> --width <N\|N%>` / `--height <N\|N%>` | Size tiled terminal/command spawns exactly along the split axis. Use `--height` for up/down and `--width` for left/right; composes with `--target-pane` and `--borderless`. Plugin tiled panes are not yet covered. |
+> | fixed-size tiled new-pane | `zellij-gabi action new-pane --direction <Left\|Right\|Up\|Down> --width <N\|N%>` / `--height <N\|N%>` | Size tiled terminal/command spawns exactly along the split axis. Use `--height` for up/down and `--width` for left/right; composes with `--target-pane` and `--borderless`. |
+> | anchored tiled plugin panes | `zellij-gabi action new-pane --plugin file://... --target-pane <name\|id> --direction <Left\|Right\|Up\|Down> --width <N\|N%>` / `--height <N\|N%>` | Spawn a tiled plugin next to a named pane with an explicit split size. Plugin sizing is supported for anchored placement only: pair `--target-pane` with `--direction`, use `--height` for up/down or `--width` for left/right, and compose with `--borderless` plus `--configuration key=value`. |
 > | move-pane targeting | `zellij-gabi action move-pane <Left\|Right\|Up\|Down> --pane-id <source-id> --to-pane-id <dest-id>` | Structural re-parent to an explicit destination, not the focus-history geom swap that ships in upstream. |
 > | close-pane absorb | `zellij-gabi action close-pane --absorb-to <name\|id>` | Direct the freed space to an explicit surviving pane instead of the tree-left default. |
 >
@@ -25,7 +26,7 @@
 > | Tag | Upstream base | Patches included |
 > | --- | --- | --- |
 > | `v0.44.3-gabi.1` | `v0.44.3` | new-pane targeting, move-pane targeting, close-pane absorb |
-> | Unreleased | `v0.44.3` | fixed-size tiled new-pane |
+> | Unreleased | `v0.44.3` | fixed-size tiled new-pane, anchored sized tiled plugin panes |
 >
 > ### Upstream PR status
 >

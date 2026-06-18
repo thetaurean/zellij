@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
-* fork(thetaurean): fixed-size tiled `new-pane` — `--width`/`--height` now also apply to terminal/command tiled spawns when paired with `--direction`; accepts fixed cells or percent, composes with `--target-pane`/`--borderless`, and leaves plugin tiled panes for a follow-up.
+* fork(thetaurean): fixed-size tiled `new-pane` — `--width`/`--height` now apply to terminal/command tiled spawns when paired with `--direction`; tiled plugin panes also support explicit size for anchored placement with `--target-pane` + `--direction`, composing with `--borderless` and `--configuration`.
 * fork(thetaurean): `close-pane --absorb-to <name|id>` — close a tiled pane and direct its freed space to a specific surviving pane (by name or id) instead of zellij's default tree-left absorber. Patch 3 of the thetaurean fork series; see `FORK_NOTES.md`.
 
 ## [0.44.3] - 2026-05-13
